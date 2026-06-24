@@ -68,12 +68,9 @@ export default function ImportarCapacitaciones() {
     return null
   }
 
-  // Convierte cualquier valor de correo en un identificador usable
-  // Si está vacío o es inválido, genera un placeholder único por nombre+capacitación
   function resolverCorreo(valor, nombreColab, nombreCap) {
     const raw = (valor || '').toString().trim().toLowerCase()
     if (raw && raw.includes('@')) return raw
-    // Sin correo válido: usar placeholder basado en nombre y capacitación
     const base = `sin-correo__${(nombreColab || '').toLowerCase().replace(/\s+/g, '_')}__${(nombreCap || '').toLowerCase().replace(/\s+/g, '_')}`
     return base
   }
@@ -198,18 +195,18 @@ export default function ImportarCapacitaciones() {
       vistos.add(clave)
 
       participantesLote.push({
-        colaborador_id: colId,          // puede ser null si ya no está en la org
+        colaborador_id: colId,
         capacitacion_id: capId,
-        correo: correo,                 // siempre tiene valor
+        correo: correo,
       })
     }
 
     addLog(`📊 ${participantesLote.length} participantes únicos a importar`)
-    if (sinCorreo > 0) addLog(`⚠️ ${sinCorreo} filas sin correo válido (se importan igual como participantes)`, 'warn')
+    if (sinCorreo > 0) addLog(`⚠️ ${sinCorreo} filas sin correo válido (se importan igual)`, 'warn')
     if (sinColab > 0) addLog(`⚠️ ${sinColab} participantes ya no están en la organización (se importan igual)`, 'warn')
     if (sinCap > 0) addLog(`⚠️ ${sinCap} filas con capacitación no encontrada (se omiten)`, 'warn')
 
-    // Insertar en lotes — ahora sin restricción de colaborador_id
+    // ── Insertar en lotes usando el nuevo constraint ─────────────
     let partInsertados = 0
     const lotePart = 100
 
@@ -217,7 +214,7 @@ export default function ImportarCapacitaciones() {
       const batch = participantesLote.slice(i, i + lotePart)
       const { error } = await supabase
         .from('participantes')
-        .upsert(batch, { onConflict: 'colaborador_id,capacitacion_id', ignoreDuplicates: true })
+        .upsert(batch, { onConflict: 'correo,capacitacion_id', ignoreDuplicates: true })
       if (!error) partInsertados += batch.length
       setProgreso(Math.round(((i + batch.length) / participantesLote.length) * 100))
     }
