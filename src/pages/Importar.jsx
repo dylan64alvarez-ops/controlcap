@@ -19,12 +19,25 @@ export default function Importar() {
       .replace(/\b\w/g, l => l.toUpperCase())
   }
 
-  // Busca el valor de una fila probando múltiples nombres de columna
+  // Busca valor probando múltiples nombres, incluyendo variantes con saltos de línea y asteriscos
   function buscar(fila, opciones) {
+    // Primero busca exacto
     for (const op of opciones) {
-      const val = fila[op]
-      if (val !== undefined && val !== null && val !== '') {
-        return val.toString().trim()
+      if (fila[op] !== undefined && fila[op] !== null && fila[op] !== '') {
+        return fila[op].toString().trim()
+      }
+    }
+    // Si no encuentra, busca en las claves del objeto ignorando saltos de línea, asteriscos y espacios extra
+    const claves = Object.keys(fila)
+    for (const op of opciones) {
+      const opLimpio = op.toLowerCase().replace(/[\*\n\r]/g, '').replace(/\s+/g, ' ').trim()
+      for (const clave of claves) {
+        const claveLimpia = clave.toLowerCase().replace(/[\*\n\r]/g, '').replace(/\s+/g, ' ').trim()
+        if (claveLimpia.includes(opLimpio) || opLimpio.includes(claveLimpia)) {
+          if (fila[clave] !== undefined && fila[clave] !== null && fila[clave] !== '') {
+            return fila[clave].toString().trim()
+          }
+        }
       }
     }
     return ''
@@ -40,54 +53,48 @@ export default function Importar() {
 
     const buffer = await archivo.arrayBuffer()
     const wb = XLSX.read(buffer)
-
-    // Muestra todas las hojas disponibles
     const hojas = wb.SheetNames
-    setDetalle(`Hojas encontradas: ${hojas.join(', ')}`)
 
-    // Lee la primera hoja
+    // Lee la primera hoja con header:1 para obtener las claves reales
     const ws = wb.Sheets[wb.SheetNames[0]]
     const filas = XLSX.utils.sheet_to_json(ws)
 
     if (filas.length === 0) {
       setEstado('error')
-      setMensaje('❌ El archivo no tiene datos o la primera hoja está vacía.')
-      setDetalle(`Hojas disponibles: ${hojas.join(', ')}. Asegurate que los datos estén en la primera hoja.`)
+      setMensaje('❌ No se encontraron datos.')
+      setDetalle(`Hojas: ${hojas.join(', ')}. Verificá que los datos estén debajo del encabezado.`)
       return
     }
 
-    // Muestra las columnas que encontró
     const columnas = Object.keys(filas[0])
-    setDetalle(`Columnas detectadas: ${columnas.join(' | ')}`)
+    setDetalle(`Columnas detectadas: ${columnas.map(c => c.replace(/\n/g, ' ')).join(' | ')}`)
     setMensaje(`${filas.length} filas encontradas. Importando...`)
     setEstado('importando')
 
     let exitosos = 0
     let errores = 0
+    const erroresDetalle = []
 
     for (const fila of filas) {
-      // Busca el correo con múltiples variantes
       const correo = buscar(fila, [
-        'Correo Electrónico', 'Correo electronico', 'Correo Electronico',
-        'correo electrónico', 'correo electronico',
-        'Correo', 'correo', 'Email', 'email', 'EMAIL',
-        'CORREO', 'CORREO ELECTRÓNICO'
+        'Correo Electrónico', 'Correo electronico', 'Correo Electrónico\n(ID ÚNICO)',
+        'correo electrónico', 'Correo', 'correo', 'Email', 'email', 'ID ÚNICO'
       ])
 
       if (!correo || !correo.includes('@')) continue
 
       const colaborador = {
         correo: correo.toLowerCase(),
-        nombre: buscar(fila, ['Nombre Completo', 'Nombre', 'nombre', 'NOMBRE', 'nombre completo']),
-        cedula: buscar(fila, ['Cédula', 'Cedula', 'cedula', 'CEDULA', 'cédula']),
-        genero: buscar(fila, ['Género', 'Genero', 'genero', 'GENERO', 'género', 'Sexo', 'sexo']),
-        fecha_ingreso: buscar(fila, ['Fecha de Ingreso', 'Fecha Ingreso', 'fecha ingreso', 'FECHA INGRESO', 'Fecha de ingreso']) || null,
-        gerencia: normalizar(buscar(fila, ['Gerencia', 'gerencia', 'GERENCIA', 'Gerencias'])),
-        departamento: normalizar(buscar(fila, ['Departamento', 'departamento', 'DEPARTAMENTO', 'Depto', 'depto'])),
-        area: normalizar(buscar(fila, ['Área', 'Area', 'area', 'AREA', 'área'])),
-        jefatura: buscar(fila, ['Jefatura', 'jefatura', 'JEFATURA', 'Jefe', 'jefe']),
-        puesto: buscar(fila, ['Puesto', 'puesto', 'PUESTO', 'Cargo', 'cargo', 'Posición', 'posicion']),
-        centro_gestor: buscar(fila, ['Centro Gestor', 'centro gestor', 'CENTRO GESTOR', 'CentroGestor', 'Centro']),
+        nombre: buscar(fila, ['Nombre Completo', 'Nombre', 'nombre']),
+        cedula: buscar(fila, ['Cédula', 'Cedula', 'cedula']),
+        genero: buscar(fila, ['Género', 'Genero', 'genero', 'Sexo']),
+        fecha_ingreso: buscar(fila, ['Fecha de Ingreso', 'Fecha Ingreso', 'fecha ingreso']) || null,
+        gerencia: normalizar(buscar(fila, ['Gerencia', 'gerencia', 'GERENCIA'])),
+        departamento: normalizar(buscar(fila, ['Departamento', 'departamento', 'Depto'])),
+        area: normalizar(buscar(fila, ['Área', 'Area', 'area'])),
+        jefatura: buscar(fila, ['Jefatura', 'jefatura']),
+        puesto: buscar(fila, ['Puesto', 'puesto', 'Cargo', 'cargo']),
+        centro_gestor: buscar(fila, ['Centro Gestor', 'centro gestor', 'CentroGestor']),
         estado: 'Activo'
       }
 
@@ -95,14 +102,21 @@ export default function Importar() {
         .from('colaboradores')
         .upsert(colaborador, { onConflict: 'correo' })
 
-      if (!error) exitosos++
-      else errores++
+      if (!error) {
+        exitosos++
+      } else {
+        errores++
+        erroresDetalle.push(error.message)
+      }
     }
 
     setEstado('listo')
     setMensaje(`✅ ${exitosos} colaboradores importados correctamente.`)
-    if (errores > 0) setDetalle(`⚠️ ${errores} filas con error. Total procesadas: ${filas.length}`)
-    else setDetalle(`Total procesadas: ${filas.length} filas.`)
+    if (errores > 0) {
+      setDetalle(`⚠️ ${errores} errores. Primero: ${erroresDetalle[0]}`)
+    } else {
+      setDetalle(`Total procesadas: ${filas.length} filas · ${exitosos} importadas.`)
+    }
   }
 
   return (
@@ -137,17 +151,6 @@ export default function Importar() {
           {detalle}
         </div>
       )}
-
-      <div style={{ marginTop: '20px', background: 'white', borderRadius: '12px', padding: '20px', border: '1px solid #E2E8F0' }}>
-        <div style={{ fontSize: '13px', fontWeight: '500', marginBottom: '10px' }}>Columnas que debe tener tu Excel:</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
-          {['Correo Electrónico *', 'Nombre Completo *', 'Cédula', 'Género (F/M)', 'Fecha de Ingreso', 'Gerencia *', 'Departamento *', 'Área', 'Jefatura', 'Puesto', 'Centro Gestor'].map(col => (
-            <div key={col} style={{ fontSize: '12px', color: '#64748B', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ color: col.includes('*') ? '#0F9B72' : '#CBD5E1' }}>●</span>{col}
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }
