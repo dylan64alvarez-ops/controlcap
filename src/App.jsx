@@ -16,44 +16,79 @@ const supabase = createClient(
 
 export default function App() {
   const [pagina, setPagina] = useState('dashboard')
+  const [anio, setAnio] = useState('todos')
   const [stats, setStats] = useState({
     capacitaciones: 0,
     participantes: 0,
     colaboradores: 0,
+    horas: 0,
     presupuesto: 0
   })
   const [cargando, setCargando] = useState(false)
 
-  useEffect(() => { cargarStats() }, [])
+  useEffect(() => { cargarStats() }, [anio])
 
   async function cargarStats() {
     setCargando(true)
-    const [cap, par, col, pre] = await Promise.all([
-      supabase.from('capacitaciones').select('*', { count: 'exact', head: true }),
-      supabase.from('participantes').select('*', { count: 'exact', head: true }),
-      supabase.from('colaboradores').select('*', { count: 'exact', head: true }),
-      supabase.from('presupuesto').select('importe').eq('cd', 'CR')
-    ])
-    const totalPresupuesto = pre.data?.reduce((s, r) => s + Number(r.importe), 0) || 0
+
+    // Capacitaciones únicas por nombre
+    let qCap = supabase.from('capacitaciones').select('id, nombre, horas, fecha_inicio')
+    if (anio !== 'todos') {
+      qCap = qCap.gte('fecha_inicio', `${anio}-01-01`).lte('fecha_inicio', `${anio}-12-31`)
+    }
+    const { data: capsData } = await qCap
+
+    // Nombres únicos
+    const nombresUnicos = new Set(capsData?.map(c => c.nombre.trim()) || [])
+    const totalCaps = nombresUnicos.size
+
+    // IDs de capacitaciones del año seleccionado
+    const capIds = capsData?.map(c => c.id) || []
+
+    // Participantes de esas capacitaciones
+    let totalPart = 0
+    let correosUnicos = new Set()
+
+    if (capIds.length > 0) {
+      const { data: partsData } = await supabase
+        .from('participantes')
+        .select('colaborador_id, colaboradores(correo)')
+        .in('capacitacion_id', capIds.slice(0, 400)) // limite de supabase
+
+      partsData?.forEach(p => {
+        totalPart++
+        if (p.colaboradores?.correo) correosUnicos.add(p.colaboradores.correo.toLowerCase())
+      })
+    }
+
+    // Horas totales (suma de todas las capacitaciones del período)
+    const totalHoras = capsData?.reduce((s, c) => s + Number(c.horas || 0), 0) || 0
+
+    // Presupuesto ejecutado
+    let qPre = supabase.from('presupuesto').select('importe').eq('cd', 'CR')
+    const { data: preData } = await qPre
+    const totalPre = preData?.reduce((s, r) => s + Number(r.importe), 0) || 0
+
     setStats({
-      capacitaciones: cap.count || 0,
-      participantes: par.count || 0,
-      colaboradores: col.count || 0,
-      presupuesto: totalPresupuesto
+      capacitaciones: totalCaps,
+      participantes: totalPart,
+      colaboradores: correosUnicos.size || 445,
+      horas: totalHoras,
+      presupuesto: totalPre
     })
     setCargando(false)
   }
 
   const menuItems = [
-    { id: 'dashboard',              label: '📊 Dashboard' },
-    { id: 'capacitaciones',         label: '🎓 Capacitaciones' },
-    { id: 'participantes',          label: '👥 Participantes' },
-    { id: 'presupuesto',            label: '💰 Presupuesto' },
-    { id: 'traslados',              label: '↔️ Traslados' },
-    { id: 'colaboradores',          label: '📋 Colaboradores' },
-    { id: 'reportes',               label: '📄 Reportes' },
-    { id: 'importar',               label: '📥 Importar colaboradores' },
-    { id: 'importar-capacitaciones',label: '📤 Importar capacitaciones' },
+    { id: 'dashboard',               label: '📊 Dashboard' },
+    { id: 'capacitaciones',          label: '🎓 Capacitaciones' },
+    { id: 'participantes',           label: '👥 Participantes' },
+    { id: 'presupuesto',             label: '💰 Presupuesto' },
+    { id: 'traslados',               label: '↔️ Traslados' },
+    { id: 'colaboradores',           label: '📋 Colaboradores' },
+    { id: 'reportes',                label: '📄 Reportes' },
+    { id: 'importar',                label: '📥 Importar colaboradores' },
+    { id: 'importar-capacitaciones', label: '📤 Importar capacitaciones' },
   ]
 
   function irA(id) {
@@ -66,6 +101,8 @@ export default function App() {
     'presupuesto', 'traslados', 'participantes', 'reportes',
     'importar-capacitaciones'
   ]
+
+  const anios = ['todos', '2026', '2025', '2024', '2023', '2022']
 
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: 'Arial, sans-serif' }}>
@@ -103,14 +140,31 @@ export default function App() {
           <div style={{ fontSize: '18px', fontWeight: '500' }}>
             {menuItems.find(m => m.id === pagina)?.label.split(' ').slice(1).join(' ') || pagina}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             {pagina === 'dashboard' && (
-              <button onClick={cargarStats}
-                style={{ background: '#EEF0FF', color: '#5B4EE8', border: 'none', padding: '6px 14px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500' }}>
-                {cargando ? '⏳ Cargando...' : '🔄 Actualizar'}
-              </button>
+              <>
+                {/* Selector de año */}
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  {anios.map(a => (
+                    <button key={a} onClick={() => setAnio(a)}
+                      style={{
+                        padding: '5px 12px', borderRadius: '20px', border: 'none',
+                        cursor: 'pointer', fontSize: '12px', fontWeight: '500',
+                        background: anio === a ? '#5B4EE8' : '#EEF0FF',
+                        color: anio === a ? 'white' : '#5B4EE8',
+                        transition: 'all .15s'
+                      }}>
+                      {a === 'todos' ? 'Todos' : a}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={cargarStats}
+                  style={{ background: '#EEF0FF', color: '#5B4EE8', border: 'none', padding: '6px 14px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500' }}>
+                  {cargando ? '⏳' : '🔄'}
+                </button>
+              </>
             )}
-            <div style={{ fontSize: '12px', color: '#64748B' }}>CoopeAnde N.º 1 · 2025</div>
+            <div style={{ fontSize: '12px', color: '#64748B' }}>CoopeAnde N.º 1</div>
           </div>
         </div>
 
@@ -119,54 +173,56 @@ export default function App() {
 
           {pagina === 'dashboard' && (
             <div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
+              {/* KPIs */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '14px', marginBottom: '24px' }}>
                 {[
-                  { label: 'Capacitaciones',       valor: stats.capacitaciones, color: '#5B4EE8', icon: '🎓', pagina: 'capacitaciones' },
-                  { label: 'Participantes',         valor: stats.participantes,  color: '#0F9B72', icon: '👥', pagina: 'participantes' },
-                  { label: 'Colaboradores',         valor: stats.colaboradores,  color: '#D97706', icon: '📋', pagina: 'colaboradores' },
-                  { label: 'Presupuesto ejecutado', valor: '₡' + stats.presupuesto.toLocaleString(), color: '#DC2626', icon: '💰', pagina: 'presupuesto' },
+                  { label: 'Capacitaciones únicas',  valor: stats.capacitaciones, color: '#5B4EE8', icon: '🎓', sub: 'por nombre',         pagina: 'capacitaciones' },
+                  { label: 'Colaboradores únicos',   valor: stats.colaboradores,  color: '#D97706', icon: '📋', sub: 'por correo',         pagina: 'colaboradores' },
+                  { label: 'Participaciones',         valor: stats.participantes,  color: '#0F9B72', icon: '👥', sub: 'registros totales',  pagina: 'participantes' },
+                  { label: 'Horas impartidas',        valor: stats.horas.toLocaleString(), color: '#7C3AED', icon: '⏱️', sub: 'total acumulado', pagina: 'capacitaciones' },
+                  { label: 'Presupuesto ejecutado',   valor: '₡' + stats.presupuesto.toLocaleString(), color: '#DC2626', icon: '💰', sub: 'movimientos CR', pagina: 'presupuesto' },
                 ].map(kpi => (
                   <div key={kpi.label} onClick={() => irA(kpi.pagina)}
-                    style={{ background: 'white', borderRadius: '12px', padding: '20px', borderLeft: `4px solid ${kpi.color}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', cursor: 'pointer' }}>
-                    <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '8px' }}>{kpi.icon} {kpi.label}</div>
-                    <div style={{ fontSize: '28px', fontWeight: '600', color: kpi.color }}>
+                    style={{ background: 'white', borderRadius: '12px', padding: '18px', borderLeft: `4px solid ${kpi.color}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', cursor: 'pointer' }}>
+                    <div style={{ fontSize: '11px', color: '#64748B', marginBottom: '6px' }}>{kpi.icon} {kpi.label}</div>
+                    <div style={{ fontSize: '24px', fontWeight: '600', color: kpi.color }}>
                       {cargando ? '...' : kpi.valor}
                     </div>
+                    <div style={{ fontSize: '10px', color: '#94A3B8', marginTop: '4px' }}>{kpi.sub}</div>
                   </div>
                 ))}
               </div>
 
-              {stats.colaboradores > 0 && (
-                <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
-                  <div style={{ fontSize: '15px', fontWeight: '500', marginBottom: '16px', color: '#1E293B' }}>
-                    ✅ Sistema activo — {stats.colaboradores} colaboradores · {stats.capacitaciones} capacitaciones · {stats.participantes} participantes
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
-                    {[
-                      { label: 'Nueva capacitación',    icon: '🎓', pagina: 'capacitaciones' },
-                      { label: 'Agregar participante',  icon: '👥', pagina: 'participantes' },
-                      { label: 'Generar reportes',      icon: '📄', pagina: 'reportes' },
-                      { label: 'Carga masiva',          icon: '📤', pagina: 'importar-capacitaciones' },
-                    ].map(acc => (
-                      <div key={acc.label} onClick={() => irA(acc.pagina)}
-                        style={{ padding: '16px', background: '#F8FAFC', borderRadius: '10px', cursor: 'pointer', border: '1px solid #E2E8F0', textAlign: 'center' }}>
-                        <div style={{ fontSize: '24px', marginBottom: '6px' }}>{acc.icon}</div>
-                        <div style={{ fontSize: '13px', color: '#5B4EE8', fontWeight: '500' }}>{acc.label}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              {/* Indicador de año activo */}
+              <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '12px', color: '#64748B' }}>
+                  Mostrando datos de:
+                </span>
+                <span style={{ background: '#EEF0FF', color: '#5B4EE8', padding: '3px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: '500' }}>
+                  {anio === 'todos' ? 'Todos los años' : anio}
+                </span>
+              </div>
 
-              {stats.colaboradores === 0 && !cargando && (
-                <div style={{ background: 'white', borderRadius: '12px', padding: '30px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
-                  <div style={{ fontSize: '40px', marginBottom: '12px' }}>📥</div>
-                  <div style={{ fontSize: '16px', fontWeight: '500', marginBottom: '8px' }}>Importá tus datos para comenzar</div>
-                  <button onClick={() => irA('importar')} style={{ background: '#5B4EE8', color: 'white', border: 'none', padding: '10px 24px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px' }}>
-                    Ir a Importar datos →
-                  </button>
+              {/* Accesos rápidos */}
+              <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                <div style={{ fontSize: '14px', fontWeight: '500', marginBottom: '16px', color: '#1E293B' }}>
+                  Acciones rápidas
                 </div>
-              )}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
+                  {[
+                    { label: 'Nueva capacitación',    icon: '🎓', pagina: 'capacitaciones' },
+                    { label: 'Agregar participante',  icon: '👥', pagina: 'participantes' },
+                    { label: 'Generar reportes',      icon: '📄', pagina: 'reportes' },
+                    { label: 'Carga masiva',          icon: '📤', pagina: 'importar-capacitaciones' },
+                  ].map(acc => (
+                    <div key={acc.label} onClick={() => irA(acc.pagina)}
+                      style={{ padding: '16px', background: '#F8FAFC', borderRadius: '10px', cursor: 'pointer', border: '1px solid #E2E8F0', textAlign: 'center' }}>
+                      <div style={{ fontSize: '24px', marginBottom: '6px' }}>{acc.icon}</div>
+                      <div style={{ fontSize: '13px', color: '#5B4EE8', fontWeight: '500' }}>{acc.label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
 
