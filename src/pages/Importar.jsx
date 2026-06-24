@@ -19,15 +19,46 @@ export default function Importar() {
       .replace(/\b\w/g, l => l.toUpperCase())
   }
 
-  // Busca valor probando múltiples nombres, incluyendo variantes con saltos de línea y asteriscos
+  // Convierte fecha de Excel (número o string) a formato YYYY-MM-DD
+  function convertirFecha(valor) {
+    if (!valor) return null
+    try {
+      // Si es número (serial de Excel)
+      if (typeof valor === 'number') {
+        const fecha = XLSX.SSF.parse_date_code(valor)
+        if (fecha) {
+          const m = String(fecha.m).padStart(2, '0')
+          const d = String(fecha.d).padStart(2, '0')
+          return `${fecha.y}-${m}-${d}`
+        }
+      }
+      // Si ya es un objeto Date
+      if (valor instanceof Date) {
+        return valor.toISOString().split('T')[0]
+      }
+      // Si es string tipo DD/MM/YYYY
+      const str = valor.toString().trim()
+      if (str.includes('/')) {
+        const partes = str.split('/')
+        if (partes.length === 3) {
+          const [d, m, y] = partes
+          return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`
+        }
+      }
+      // Si es string tipo YYYY-MM-DD
+      if (str.match(/^\d{4}-\d{2}-\d{2}/)) return str.slice(0, 10)
+      return null
+    } catch {
+      return null
+    }
+  }
+
   function buscar(fila, opciones) {
-    // Primero busca exacto
     for (const op of opciones) {
       if (fila[op] !== undefined && fila[op] !== null && fila[op] !== '') {
-        return fila[op].toString().trim()
+        return fila[op]
       }
     }
-    // Si no encuentra, busca en las claves del objeto ignorando saltos de línea, asteriscos y espacios extra
     const claves = Object.keys(fila)
     for (const op of opciones) {
       const opLimpio = op.toLowerCase().replace(/[\*\n\r]/g, '').replace(/\s+/g, ' ').trim()
@@ -35,12 +66,17 @@ export default function Importar() {
         const claveLimpia = clave.toLowerCase().replace(/[\*\n\r]/g, '').replace(/\s+/g, ' ').trim()
         if (claveLimpia.includes(opLimpio) || opLimpio.includes(claveLimpia)) {
           if (fila[clave] !== undefined && fila[clave] !== null && fila[clave] !== '') {
-            return fila[clave].toString().trim()
+            return fila[clave]
           }
         }
       }
     }
     return ''
+  }
+
+  function buscarTexto(fila, opciones) {
+    const val = buscar(fila, opciones)
+    return val ? val.toString().trim() : ''
   }
 
   async function procesarArchivo(e) {
@@ -52,22 +88,19 @@ export default function Importar() {
     setDetalle('')
 
     const buffer = await archivo.arrayBuffer()
-    const wb = XLSX.read(buffer)
-    const hojas = wb.SheetNames
-
-    // Lee la primera hoja con header:1 para obtener las claves reales
+    // cellDates: false para que las fechas lleguen como números seriales
+    const wb = XLSX.read(buffer, { cellDates: false })
     const ws = wb.Sheets[wb.SheetNames[0]]
     const filas = XLSX.utils.sheet_to_json(ws)
 
     if (filas.length === 0) {
       setEstado('error')
       setMensaje('❌ No se encontraron datos.')
-      setDetalle(`Hojas: ${hojas.join(', ')}. Verificá que los datos estén debajo del encabezado.`)
       return
     }
 
     const columnas = Object.keys(filas[0])
-    setDetalle(`Columnas detectadas: ${columnas.map(c => c.replace(/\n/g, ' ')).join(' | ')}`)
+    setDetalle(`${filas.length} filas · Columnas: ${columnas.map(c => c.replace(/\n/g,' ')).join(' | ')}`)
     setMensaje(`${filas.length} filas encontradas. Importando...`)
     setEstado('importando')
 
@@ -76,25 +109,28 @@ export default function Importar() {
     const erroresDetalle = []
 
     for (const fila of filas) {
-      const correo = buscar(fila, [
+      const correo = buscarTexto(fila, [
         'Correo Electrónico', 'Correo electronico', 'Correo Electrónico\n(ID ÚNICO)',
-        'correo electrónico', 'Correo', 'correo', 'Email', 'email', 'ID ÚNICO'
+        'correo electrónico', 'Correo', 'correo', 'Email', 'email'
       ])
 
       if (!correo || !correo.includes('@')) continue
 
+      const fechaRaw = buscar(fila, ['Fecha de Ingreso', 'Fecha Ingreso', 'fecha ingreso'])
+      const fechaConvertida = convertirFecha(fechaRaw)
+
       const colaborador = {
         correo: correo.toLowerCase(),
-        nombre: buscar(fila, ['Nombre Completo', 'Nombre', 'nombre']),
-        cedula: buscar(fila, ['Cédula', 'Cedula', 'cedula']),
-        genero: buscar(fila, ['Género', 'Genero', 'genero', 'Sexo']),
-        fecha_ingreso: buscar(fila, ['Fecha de Ingreso', 'Fecha Ingreso', 'fecha ingreso']) || null,
-        gerencia: normalizar(buscar(fila, ['Gerencia', 'gerencia', 'GERENCIA'])),
-        departamento: normalizar(buscar(fila, ['Departamento', 'departamento', 'Depto'])),
-        area: normalizar(buscar(fila, ['Área', 'Area', 'area'])),
-        jefatura: buscar(fila, ['Jefatura', 'jefatura']),
-        puesto: buscar(fila, ['Puesto', 'puesto', 'Cargo', 'cargo']),
-        centro_gestor: buscar(fila, ['Centro Gestor', 'centro gestor', 'CentroGestor']),
+        nombre: buscarTexto(fila, ['Nombre Completo', 'Nombre', 'nombre']),
+        cedula: buscarTexto(fila, ['Cédula', 'Cedula', 'cedula']),
+        genero: buscarTexto(fila, ['Género', 'Genero', 'genero', 'Sexo']),
+        fecha_ingreso: fechaConvertida,
+        gerencia: normalizar(buscarTexto(fila, ['Gerencia', 'gerencia'])),
+        departamento: normalizar(buscarTexto(fila, ['Departamento', 'departamento', 'Depto'])),
+        area: normalizar(buscarTexto(fila, ['Área', 'Area', 'area'])),
+        jefatura: buscarTexto(fila, ['Jefatura', 'jefatura']),
+        puesto: buscarTexto(fila, ['Puesto', 'puesto', 'Cargo']),
+        centro_gestor: buscarTexto(fila, ['Centro Gestor', 'centro gestor']),
         estado: 'Activo'
       }
 
@@ -106,16 +142,16 @@ export default function Importar() {
         exitosos++
       } else {
         errores++
-        erroresDetalle.push(error.message)
+        if (erroresDetalle.length < 3) erroresDetalle.push(error.message)
       }
     }
 
     setEstado('listo')
     setMensaje(`✅ ${exitosos} colaboradores importados correctamente.`)
     if (errores > 0) {
-      setDetalle(`⚠️ ${errores} errores. Primero: ${erroresDetalle[0]}`)
+      setDetalle(`⚠️ ${errores} errores. Ejemplo: ${erroresDetalle[0]}`)
     } else {
-      setDetalle(`Total procesadas: ${filas.length} filas · ${exitosos} importadas.`)
+      setDetalle(`Total: ${filas.length} filas procesadas · ${exitosos} importadas exitosamente.`)
     }
   }
 
