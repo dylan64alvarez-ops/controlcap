@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Importar from './pages/Importar.jsx'
 import Colaboradores from './pages/Colaboradores.jsx'
+import Capacitaciones from './pages/Capacitaciones.jsx'
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -18,9 +19,7 @@ export default function App() {
   })
   const [cargando, setCargando] = useState(false)
 
-  useEffect(() => {
-    cargarStats()
-  }, [])
+  useEffect(() => { cargarStats() }, [])
 
   async function cargarStats() {
     setCargando(true)
@@ -71,17 +70,13 @@ export default function App() {
         </div>
         <nav style={{ padding: '10px 0' }}>
           {menuItems.map(item => (
-            <div
-              key={item.id}
-              onClick={() => irA(item.id)}
+            <div key={item.id} onClick={() => irA(item.id)}
               style={{
-                padding: '10px 20px',
-                cursor: 'pointer',
+                padding: '10px 20px', cursor: 'pointer',
                 background: pagina === item.id ? 'rgba(255,255,255,0.15)' : 'transparent',
                 borderLeft: pagina === item.id ? '3px solid #F59E0B' : '3px solid transparent',
                 fontSize: '13px',
-              }}
-            >
+              }}>
               {item.label}
             </div>
           ))}
@@ -133,11 +128,12 @@ export default function App() {
                   <div style={{ fontSize: '15px', fontWeight: '500', marginBottom: '16px', color: '#1E293B' }}>
                     ✅ Sistema activo — {stats.colaboradores} colaboradores cargados
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
                     {[
-                      { label: 'Ver colaboradores', icon: '📋', pagina: 'colaboradores' },
-                      { label: 'Registrar capacitación', icon: '🎓', pagina: 'capacitaciones' },
-                      { label: 'Control presupuesto', icon: '💰', pagina: 'presupuesto' },
+                      { label: 'Ver colaboradores',     icon: '📋', pagina: 'colaboradores' },
+                      { label: 'Nueva capacitación',    icon: '🎓', pagina: 'capacitaciones' },
+                      { label: 'Control presupuesto',   icon: '💰', pagina: 'presupuesto' },
+                      { label: 'Traslados',             icon: '↔️', pagina: 'traslados' },
                     ].map(acc => (
                       <div key={acc.label} onClick={() => irA(acc.pagina)}
                         style={{ padding: '16px', background: '#F8FAFC', borderRadius: '10px', cursor: 'pointer', border: '1px solid #E2E8F0', textAlign: 'center' }}>
@@ -161,15 +157,14 @@ export default function App() {
             </div>
           )}
 
-          {pagina === 'colaboradores' && <Colaboradores />}
-          {pagina === 'importar' && <Importar onImportado={cargarStats} />}
+          {pagina === 'colaboradores'  && <Colaboradores />}
+          {pagina === 'capacitaciones' && <Capacitaciones onCambio={cargarStats} />}
+          {pagina === 'importar'       && <Importar onImportado={cargarStats} />}
 
-          {!['dashboard', 'importar', 'colaboradores'].includes(pagina) && (
+          {!['dashboard','importar','colaboradores','capacitaciones'].includes(pagina) && (
             <div style={{ background: 'white', borderRadius: '12px', padding: '40px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
               <div style={{ fontSize: '40px', marginBottom: '12px' }}>🚧</div>
-              <div style={{ fontSize: '16px', fontWeight: '500', marginBottom: '8px' }}>
-                Módulo: {pagina}
-              </div>
+              <div style={{ fontSize: '16px', fontWeight: '500', marginBottom: '8px' }}>Módulo: {pagina}</div>
               <div style={{ fontSize: '13px', color: '#64748B' }}>Este módulo se construye en el siguiente paso</div>
             </div>
           )}
