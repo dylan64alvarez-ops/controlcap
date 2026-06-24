@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js'
 import Importar from './pages/Importar.jsx'
 import Colaboradores from './pages/Colaboradores.jsx'
 import Capacitaciones from './pages/Capacitaciones.jsx'
+import Presupuesto from './pages/Presupuesto.jsx'
+import Traslados from './pages/Traslados.jsx'
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -27,7 +29,7 @@ export default function App() {
       supabase.from('capacitaciones').select('*', { count: 'exact', head: true }),
       supabase.from('participantes').select('*', { count: 'exact', head: true }),
       supabase.from('colaboradores').select('*', { count: 'exact', head: true }),
-      supabase.from('presupuesto').select('importe')
+      supabase.from('presupuesto').select('importe').eq('cd', 'CR')
     ])
     const totalPresupuesto = pre.data?.reduce((s, r) => s + Number(r.importe), 0) || 0
     setStats({
@@ -54,6 +56,8 @@ export default function App() {
     setPagina(id)
     if (id === 'dashboard') cargarStats()
   }
+
+  const paginasActivas = ['dashboard','importar','colaboradores','capacitaciones','presupuesto','traslados']
 
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: 'Arial, sans-serif' }}>
@@ -107,14 +111,16 @@ export default function App() {
 
           {pagina === 'dashboard' && (
             <div>
+              {/* KPIs */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
                 {[
-                  { label: 'Capacitaciones', valor: stats.capacitaciones, color: '#5B4EE8', icon: '🎓' },
-                  { label: 'Participantes',  valor: stats.participantes,  color: '#0F9B72', icon: '👥' },
-                  { label: 'Colaboradores',  valor: stats.colaboradores,  color: '#D97706', icon: '📋' },
-                  { label: 'Presupuesto',    valor: '₡' + stats.presupuesto.toLocaleString(), color: '#DC2626', icon: '💰' },
+                  { label: 'Capacitaciones', valor: stats.capacitaciones, color: '#5B4EE8', icon: '🎓', pagina: 'capacitaciones' },
+                  { label: 'Participantes',  valor: stats.participantes,  color: '#0F9B72', icon: '👥', pagina: 'participantes' },
+                  { label: 'Colaboradores',  valor: stats.colaboradores,  color: '#D97706', icon: '📋', pagina: 'colaboradores' },
+                  { label: 'Presupuesto ejecutado', valor: '₡' + stats.presupuesto.toLocaleString(), color: '#DC2626', icon: '💰', pagina: 'presupuesto' },
                 ].map(kpi => (
-                  <div key={kpi.label} style={{ background: 'white', borderRadius: '12px', padding: '20px', borderLeft: `4px solid ${kpi.color}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                  <div key={kpi.label} onClick={() => irA(kpi.pagina)}
+                    style={{ background: 'white', borderRadius: '12px', padding: '20px', borderLeft: `4px solid ${kpi.color}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', cursor: 'pointer' }}>
                     <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '8px' }}>{kpi.icon} {kpi.label}</div>
                     <div style={{ fontSize: '28px', fontWeight: '600', color: kpi.color }}>
                       {cargando ? '...' : kpi.valor}
@@ -123,6 +129,7 @@ export default function App() {
                 ))}
               </div>
 
+              {/* Accesos rápidos */}
               {stats.colaboradores > 0 && (
                 <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                   <div style={{ fontSize: '15px', fontWeight: '500', marginBottom: '16px', color: '#1E293B' }}>
@@ -130,10 +137,10 @@ export default function App() {
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
                     {[
-                      { label: 'Ver colaboradores',     icon: '📋', pagina: 'colaboradores' },
-                      { label: 'Nueva capacitación',    icon: '🎓', pagina: 'capacitaciones' },
-                      { label: 'Control presupuesto',   icon: '💰', pagina: 'presupuesto' },
-                      { label: 'Traslados',             icon: '↔️', pagina: 'traslados' },
+                      { label: 'Ver colaboradores',   icon: '📋', pagina: 'colaboradores' },
+                      { label: 'Nueva capacitación',  icon: '🎓', pagina: 'capacitaciones' },
+                      { label: 'Control presupuesto', icon: '💰', pagina: 'presupuesto' },
+                      { label: 'Traslados',           icon: '↔️', pagina: 'traslados' },
                     ].map(acc => (
                       <div key={acc.label} onClick={() => irA(acc.pagina)}
                         style={{ padding: '16px', background: '#F8FAFC', borderRadius: '10px', cursor: 'pointer', border: '1px solid #E2E8F0', textAlign: 'center' }}>
@@ -159,9 +166,11 @@ export default function App() {
 
           {pagina === 'colaboradores'  && <Colaboradores />}
           {pagina === 'capacitaciones' && <Capacitaciones onCambio={cargarStats} />}
+          {pagina === 'presupuesto'    && <Presupuesto onCambio={cargarStats} />}
+          {pagina === 'traslados'      && <Traslados onCambio={cargarStats} />}
           {pagina === 'importar'       && <Importar onImportado={cargarStats} />}
 
-          {!['dashboard','importar','colaboradores','capacitaciones'].includes(pagina) && (
+          {!paginasActivas.includes(pagina) && (
             <div style={{ background: 'white', borderRadius: '12px', padding: '40px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
               <div style={{ fontSize: '40px', marginBottom: '12px' }}>🚧</div>
               <div style={{ fontSize: '16px', fontWeight: '500', marginBottom: '8px' }}>Módulo: {pagina}</div>
