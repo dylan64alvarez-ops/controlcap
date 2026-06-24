@@ -31,73 +31,58 @@ export default function App() {
   async function cargarStats() {
     setCargando(true)
 
-    // 1. Obtener capacitaciones filtradas por año
-    let qCap = supabase
-      .from('capacitaciones')
-      .select('id, nombre, horas, fecha_inicio')
-
+    // Usar la vista stats_por_anio para cálculos exactos
+    let query = supabase.from('stats_por_anio').select('*')
     if (anio !== 'todos') {
-      qCap = qCap
-        .gte('fecha_inicio', `${anio}-01-01`)
-        .lte('fecha_inicio', `${anio}-12-31`)
+      query = query.eq('anio', parseInt(anio))
     }
+    const { data: statsData, error } = await query
 
-    const { data: capsData } = await qCap
+    let capacitaciones = 0
+    let colaboradores = 0
+    let participantes = 0
+    let horas = 0
 
-    // Capacitaciones únicas por nombre
-    const nombresUnicos = new Set(capsData?.map(c => c.nombre?.trim()) || [])
-    const totalCaps = nombresUnicos.size
-
-    // IDs de capacitaciones del período
-    const capIds = capsData?.map(c => c.id) || []
-
-    // Mapa de horas por capacitación ID
-    const horasPorCapId = {}
-    capsData?.forEach(c => { horasPorCapId[c.id] = Number(c.horas || 0) })
-
-    // 2. Obtener participantes de esas capacitaciones
-    let totalHoras = 0
-    let correosUnicos = new Set()
-    let totalPart = 0
-
-    if (capIds.length > 0) {
-      // Supabase tiene límite de 1000 en IN, hacemos lotes
-      const lote = 200
-      for (let i = 0; i < capIds.length; i += lote) {
-        const batch = capIds.slice(i, i + lote)
-        const { data: partsData } = await supabase
-          .from('participantes')
-          .select('colaborador_id, capacitacion_id, colaboradores(correo)')
-          .in('capacitacion_id', batch)
-
-        partsData?.forEach(p => {
-          totalPart++
-          // Horas = horas de la capacitación × cada participante
-          totalHoras += horasPorCapId[p.capacitacion_id] || 0
-          // Correo único
-          const correo = p.colaboradores?.correo?.toLowerCase().trim()
-          if (correo && correo !== '-' && correo.includes('@')) {
-            correosUnicos.add(correo)
-          }
-        })
+    if (statsData && statsData.length > 0) {
+      if (anio !== 'todos') {
+        // Un solo año
+        const row = statsData[0]
+        capacitaciones = Number(row.capacitaciones_unicas || 0)
+        colaboradores  = Number(row.colaboradores_unicos || 0)
+        participantes  = Number(row.total_participantes || 0)
+        horas          = Number(row.total_horas || 0)
+      } else {
+        // Todos los años — sumar filas pero colaboradores/caps únicos no suman directamente
+        // Para "todos" hacemos query sin filtro de año
+        const { data: totales } = await supabase.rpc('get_totales_globales').maybeSingle()
+        if (totales) {
+          capacitaciones = Number(totales.capacitaciones_unicas || 0)
+          colaboradores  = Number(totales.colaboradores_unicos || 0)
+          participantes  = Number(totales.total_participantes || 0)
+          horas          = Number(totales.total_horas || 0)
+        } else {
+          // Fallback: sumar las filas de la vista
+          statsData.forEach(r => {
+            participantes += Number(r.total_participantes || 0)
+            horas         += Number(r.total_horas || 0)
+          })
+          // Para caps y colabs únicos en todos los años, query separada
+          const { count: cCap } = await supabase
+            .from('capacitaciones').select('*', { count: 'exact', head: true })
+          const { count: cCol } = await supabase
+            .from('colaboradores').select('*', { count: 'exact', head: true })
+          capacitaciones = cCap || 0
+          colaboradores  = cCol || 0
+        }
       }
     }
 
-    // 3. Presupuesto ejecutado (sin filtro de año por ahora)
+    // Presupuesto ejecutado
     const { data: preData } = await supabase
-      .from('presupuesto')
-      .select('importe')
-      .eq('cd', 'CR')
-
+      .from('presupuesto').select('importe').eq('cd', 'CR')
     const totalPre = preData?.reduce((s, r) => s + Number(r.importe), 0) || 0
 
-    setStats({
-      capacitaciones: totalCaps,
-      colaboradores: correosUnicos.size,
-      participantes: totalPart,
-      horas: totalHoras,
-      presupuesto: totalPre
-    })
+    setStats({ capacitaciones, colaboradores, participantes, horas, presupuesto: totalPre })
     setCargando(false)
   }
 
@@ -162,10 +147,10 @@ export default function App() {
           <div style={{ fontSize: '18px', fontWeight: '500' }}>
             {menuItems.find(m => m.id === pagina)?.label.split(' ').slice(1).join(' ') || pagina}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             {pagina === 'dashboard' && (
               <>
-                <span style={{ fontSize: '12px', color: '#94A3B8' }}>Año:</span>
+                <span style={{ fontSize: '12px', color: '#94A3B8', marginRight: '4px' }}>Año:</span>
                 {anios.map(a => (
                   <button key={a} onClick={() => setAnio(a)}
                     style={{
@@ -178,7 +163,7 @@ export default function App() {
                   </button>
                 ))}
                 <button onClick={cargarStats}
-                  style={{ background: '#EEF0FF', color: '#5B4EE8', border: 'none', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px' }}>
+                  style={{ background: '#EEF0FF', color: '#5B4EE8', border: 'none', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', marginLeft: '4px' }}>
                   {cargando ? '⏳' : '🔄'}
                 </button>
               </>
@@ -192,24 +177,22 @@ export default function App() {
 
           {pagina === 'dashboard' && (
             <div>
-
-              {/* Indicador año */}
               <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '12px', color: '#64748B' }}>Mostrando:</span>
                 <span style={{ background: '#EEF0FF', color: '#5B4EE8', padding: '3px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '500' }}>
                   {anio === 'todos' ? 'Todos los años' : `Año ${anio}`}
                 </span>
-                {cargando && <span style={{ fontSize: '12px', color: '#94A3B8' }}>Calculando...</span>}
+                {cargando && <span style={{ fontSize: '12px', color: '#94A3B8' }}>⏳ Calculando...</span>}
               </div>
 
               {/* KPIs */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '14px', marginBottom: '24px' }}>
                 {[
-                  { label: 'Capacitaciones',     valor: stats.capacitaciones,              color: '#5B4EE8', icon: '🎓', sub: 'únicas por nombre',   dest: 'capacitaciones' },
-                  { label: 'Colaboradores',       valor: stats.colaboradores,               color: '#D97706', icon: '📋', sub: 'únicos por correo',   dest: 'colaboradores' },
-                  { label: 'Participaciones',     valor: stats.participantes.toLocaleString(), color: '#0F9B72', icon: '👥', sub: 'registros totales', dest: 'participantes' },
-                  { label: 'Horas impartidas',    valor: stats.horas.toLocaleString(),      color: '#7C3AED', icon: '⏱️', sub: 'total acumulado',    dest: 'capacitaciones' },
-                  { label: 'Presupuesto (CR)',    valor: '₡' + stats.presupuesto.toLocaleString(), color: '#DC2626', icon: '💰', sub: 'ejecutado',   dest: 'presupuesto' },
+                  { label: 'Capacitaciones',   valor: stats.capacitaciones.toLocaleString(),  color: '#5B4EE8', icon: '🎓', sub: 'únicas por nombre',  dest: 'capacitaciones' },
+                  { label: 'Colaboradores',     valor: stats.colaboradores.toLocaleString(),   color: '#D97706', icon: '📋', sub: 'únicos por correo',  dest: 'colaboradores' },
+                  { label: 'Participaciones',   valor: stats.participantes.toLocaleString(),   color: '#0F9B72', icon: '👥', sub: 'registros totales',  dest: 'participantes' },
+                  { label: 'Horas impartidas',  valor: stats.horas.toLocaleString(),           color: '#7C3AED', icon: '⏱️', sub: 'total acumulado',   dest: 'capacitaciones' },
+                  { label: 'Presupuesto (CR)',  valor: '₡' + stats.presupuesto.toLocaleString(), color: '#DC2626', icon: '💰', sub: 'ejecutado',       dest: 'presupuesto' },
                 ].map(kpi => (
                   <div key={kpi.label} onClick={() => irA(kpi.dest)}
                     style={{ background: 'white', borderRadius: '12px', padding: '18px', borderLeft: `4px solid ${kpi.color}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', cursor: 'pointer' }}>
@@ -229,10 +212,10 @@ export default function App() {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
                   {[
-                    { label: 'Nueva capacitación',    icon: '🎓', pagina: 'capacitaciones' },
-                    { label: 'Agregar participante',  icon: '👥', pagina: 'participantes' },
-                    { label: 'Generar reportes',      icon: '📄', pagina: 'reportes' },
-                    { label: 'Carga masiva',          icon: '📤', pagina: 'importar-capacitaciones' },
+                    { label: 'Nueva capacitación',   icon: '🎓', pagina: 'capacitaciones' },
+                    { label: 'Agregar participante', icon: '👥', pagina: 'participantes' },
+                    { label: 'Generar reportes',     icon: '📄', pagina: 'reportes' },
+                    { label: 'Carga masiva',         icon: '📤', pagina: 'importar-capacitaciones' },
                   ].map(acc => (
                     <div key={acc.label} onClick={() => irA(acc.pagina)}
                       style={{ padding: '16px', background: '#F8FAFC', borderRadius: '10px', cursor: 'pointer', border: '1px solid #E2E8F0', textAlign: 'center' }}>
