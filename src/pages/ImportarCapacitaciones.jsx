@@ -68,6 +68,16 @@ export default function ImportarCapacitaciones() {
     return null
   }
 
+  // Convierte cualquier valor de correo en un identificador usable
+  // Si está vacío o es inválido, genera un placeholder único por nombre+capacitación
+  function resolverCorreo(valor, nombreColab, nombreCap) {
+    const raw = (valor || '').toString().trim().toLowerCase()
+    if (raw && raw.includes('@')) return raw
+    // Sin correo válido: usar placeholder basado en nombre y capacitación
+    const base = `sin-correo__${(nombreColab || '').toLowerCase().replace(/\s+/g, '_')}__${(nombreCap || '').toLowerCase().replace(/\s+/g, '_')}`
+    return base
+  }
+
   async function procesarArchivo(e) {
     const archivo = e.target.files[0]
     if (!archivo) return
@@ -81,7 +91,6 @@ export default function ImportarCapacitaciones() {
     const buffer = await archivo.arrayBuffer()
     const wb = XLSX.read(buffer, { cellDates: false, raw: true })
 
-    // Buscar hoja Reporte
     const nombreHoja = wb.SheetNames.find(n =>
       n.toLowerCase().includes('reporte') || n.toLowerCase().includes('datos')
     ) || wb.SheetNames[0]
@@ -124,7 +133,6 @@ export default function ImportarCapacitaciones() {
 
     addLog(`📝 ${capMap.size} capacitaciones únicas identificadas`)
 
-    // Insertar capacitaciones en lotes de 50
     const capsArray = Array.from(capMap.values())
     let capsInsertadas = 0
     const lote = 50
@@ -139,7 +147,7 @@ export default function ImportarCapacitaciones() {
 
     addLog(`✅ ${capsInsertadas} capacitaciones importadas`)
 
-    // ── PASO 2: Cargar capacitaciones para obtener IDs ───────────
+    // ── PASO 2: Cargar IDs de capacitaciones ─────────────────────
     addLog('🔗 Paso 2: Obteniendo IDs de capacitaciones...')
     const { data: capsDB } = await supabase
       .from('capacitaciones')
@@ -149,7 +157,7 @@ export default function ImportarCapacitaciones() {
     capsDB?.forEach(c => capIdMap.set(c.nombre.trim(), c.id))
     addLog(`✅ ${capIdMap.size} capacitaciones mapeadas`)
 
-    // ── PASO 3: Cargar colaboradores para obtener IDs ────────────
+    // ── PASO 3: Cargar colaboradores (opcional, solo para vincular) ──
     addLog('👥 Paso 3: Obteniendo colaboradores...')
     const { data: colsDB } = await supabase
       .from('colaboradores')
@@ -169,30 +177,39 @@ export default function ImportarCapacitaciones() {
     const vistos = new Set()
 
     for (const fila of filas) {
-      const correo = (fila['Correo'] || '').toString().trim().toLowerCase()
       const nombreCap = (fila['Nombre Capacitación'] || '').toString().trim()
-
-      if (!correo || !correo.includes('@')) { sinCorreo++; continue }
-
-      const colId = colIdMap.get(correo)
-      if (!colId) { sinColab++; continue }
+      const nombreColab = (fila['Colab '] || fila['Colaborador'] || '').toString().trim()
+      const correoRaw = (fila['Correo'] || '').toString().trim().toLowerCase()
 
       const capId = capIdMap.get(nombreCap)
       if (!capId) { sinCap++; continue }
 
-      const clave = `${colId}-${capId}`
+      // Resolver correo: si está vacío o no tiene @, generar placeholder
+      const correo = resolverCorreo(correoRaw, nombreColab, nombreCap)
+      if (!correoRaw || !correoRaw.includes('@')) sinCorreo++
+
+      // Buscar colaborador_id si existe, pero NO bloquear si no existe
+      const colId = colIdMap.get(correoRaw) || null
+      if (correoRaw && correoRaw.includes('@') && !colId) sinColab++
+
+      // Clave de deduplicación: correo + capacitación
+      const clave = `${correo}||${capId}`
       if (vistos.has(clave)) continue
       vistos.add(clave)
 
-      participantesLote.push({ colaborador_id: colId, capacitacion_id: capId })
+      participantesLote.push({
+        colaborador_id: colId,          // puede ser null si ya no está en la org
+        capacitacion_id: capId,
+        correo: correo,                 // siempre tiene valor
+      })
     }
 
     addLog(`📊 ${participantesLote.length} participantes únicos a importar`)
-    if (sinCorreo > 0) addLog(`⚠️ ${sinCorreo} filas sin correo válido`, 'warn')
-    if (sinColab > 0) addLog(`⚠️ ${sinColab} colaboradores no encontrados en el sistema`, 'warn')
-    if (sinCap > 0) addLog(`⚠️ ${sinCap} capacitaciones no encontradas`, 'warn')
+    if (sinCorreo > 0) addLog(`⚠️ ${sinCorreo} filas sin correo válido (se importan igual como participantes)`, 'warn')
+    if (sinColab > 0) addLog(`⚠️ ${sinColab} participantes ya no están en la organización (se importan igual)`, 'warn')
+    if (sinCap > 0) addLog(`⚠️ ${sinCap} filas con capacitación no encontrada (se omiten)`, 'warn')
 
-    // Insertar participantes en lotes de 100
+    // Insertar en lotes — ahora sin restricción de colaborador_id
     let partInsertados = 0
     const lotePart = 100
 
@@ -202,7 +219,7 @@ export default function ImportarCapacitaciones() {
         .from('participantes')
         .upsert(batch, { onConflict: 'colaborador_id,capacitacion_id', ignoreDuplicates: true })
       if (!error) partInsertados += batch.length
-      setProgreso(Math.round((i / participantesLote.length) * 100))
+      setProgreso(Math.round(((i + batch.length) / participantesLote.length) * 100))
     }
 
     setProgreso(100)
@@ -222,7 +239,6 @@ export default function ImportarCapacitaciones() {
         Cargá tu Excel histórico. El sistema crea las capacitaciones y asigna los participantes automáticamente usando la hoja <strong>"Reporte"</strong>.
       </p>
 
-      {/* Zona de carga */}
       <div style={{ border: '2px dashed #CBD5E1', borderRadius: '12px', padding: '32px', textAlign: 'center', background: 'white', marginBottom: '20px' }}>
         <div style={{ fontSize: '36px', marginBottom: '10px' }}>📊</div>
         <div style={{ fontSize: '15px', fontWeight: '500', marginBottom: '6px' }}>
@@ -252,7 +268,6 @@ export default function ImportarCapacitaciones() {
         </label>
       </div>
 
-      {/* Barra de progreso */}
       {estado === 'procesando' && (
         <div style={{ marginBottom: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#64748B', marginBottom: '6px' }}>
@@ -265,7 +280,6 @@ export default function ImportarCapacitaciones() {
         </div>
       )}
 
-      {/* Log */}
       {log.length > 0 && (
         <div style={{ background: '#0F172A', borderRadius: '10px', padding: '16px', fontFamily: 'monospace', fontSize: '12px', maxHeight: '300px', overflowY: 'auto' }}>
           {log.map((l, i) => (
@@ -277,7 +291,6 @@ export default function ImportarCapacitaciones() {
         </div>
       )}
 
-      {/* Columnas esperadas */}
       <div style={{ marginTop: '20px', background: 'white', borderRadius: '12px', padding: '18px', border: '1px solid #E2E8F0' }}>
         <div style={{ fontSize: '13px', fontWeight: '600', marginBottom: '10px', color: '#374151' }}>
           Columnas requeridas en la hoja "Reporte":
@@ -286,7 +299,7 @@ export default function ImportarCapacitaciones() {
           {[
             'Nombre Capacitación *', 'Des_Temas', 'Fecha Inicio', 'Fecha fin',
             'Horas capacitación', 'Estado', 'Empresa', 'Facilitador',
-            'Correo *', 'Costo', 'Año', 'Género'
+            'Correo (opcional)', 'Costo', 'Año', 'Género'
           ].map(c => (
             <div key={c} style={{ fontSize: '12px', color: '#64748B', display: 'flex', alignItems: 'center', gap: '5px' }}>
               <span style={{ color: c.includes('*') ? '#0F9B72' : '#CBD5E1' }}>●</span>{c}
