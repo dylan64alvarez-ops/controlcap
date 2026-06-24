@@ -15,12 +15,14 @@ export default function App() {
     colaboradores: 0,
     presupuesto: 0
   })
+  const [cargando, setCargando] = useState(false)
 
   useEffect(() => {
     cargarStats()
   }, [])
 
   async function cargarStats() {
+    setCargando(true)
     const [cap, par, col, pre] = await Promise.all([
       supabase.from('capacitaciones').select('*', { count: 'exact', head: true }),
       supabase.from('participantes').select('*', { count: 'exact', head: true }),
@@ -34,6 +36,7 @@ export default function App() {
       colaboradores: col.count || 0,
       presupuesto: totalPresupuesto
     })
+    setCargando(false)
   }
 
   const menuItems = [
@@ -46,6 +49,11 @@ export default function App() {
     { id: 'reportes',       label: '📄 Reportes' },
     { id: 'importar',       label: '📥 Importar datos' },
   ]
+
+  function irA(id) {
+    setPagina(id)
+    if (id === 'dashboard') cargarStats()
+  }
 
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: 'Arial, sans-serif' }}>
@@ -64,7 +72,7 @@ export default function App() {
           {menuItems.map(item => (
             <div
               key={item.id}
-              onClick={() => setPagina(item.id)}
+              onClick={() => irA(item.id)}
               style={{
                 padding: '10px 20px',
                 cursor: 'pointer',
@@ -84,10 +92,20 @@ export default function App() {
 
         {/* Header */}
         <div style={{ background: 'white', padding: '15px 30px', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ fontSize: '18px', fontWeight: '500', textTransform: 'capitalize' }}>
+          <div style={{ fontSize: '18px', fontWeight: '500' }}>
             {menuItems.find(m => m.id === pagina)?.label.split(' ').slice(1).join(' ') || pagina}
           </div>
-          <div style={{ fontSize: '12px', color: '#64748B' }}>CoopeAnde N.º 1 · 2025</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {pagina === 'dashboard' && (
+              <button
+                onClick={cargarStats}
+                style={{ background: '#EEF0FF', color: '#5B4EE8', border: 'none', padding: '6px 14px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500' }}
+              >
+                {cargando ? '⏳ Cargando...' : '🔄 Actualizar'}
+              </button>
+            )}
+            <div style={{ fontSize: '12px', color: '#64748B' }}>CoopeAnde N.º 1 · 2025</div>
+          </div>
         </div>
 
         {/* Páginas */}
@@ -95,27 +113,59 @@ export default function App() {
 
           {pagina === 'dashboard' && (
             <div>
+              {/* KPIs */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
                 {[
-                  { label: 'Capacitaciones', valor: stats.capacitaciones, color: '#5B4EE8' },
-                  { label: 'Participantes',  valor: stats.participantes,  color: '#0F9B72' },
-                  { label: 'Colaboradores',  valor: stats.colaboradores,  color: '#D97706' },
-                  { label: 'Presupuesto',    valor: '₡' + stats.presupuesto.toLocaleString(), color: '#DC2626' },
+                  { label: 'Capacitaciones', valor: stats.capacitaciones, color: '#5B4EE8', icon: '🎓' },
+                  { label: 'Participantes',  valor: stats.participantes,  color: '#0F9B72', icon: '👥' },
+                  { label: 'Colaboradores',  valor: stats.colaboradores,  color: '#D97706', icon: '📋' },
+                  { label: 'Presupuesto',    valor: '₡' + stats.presupuesto.toLocaleString(), color: '#DC2626', icon: '💰' },
                 ].map(kpi => (
                   <div key={kpi.label} style={{ background: 'white', borderRadius: '12px', padding: '20px', borderLeft: `4px solid ${kpi.color}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
-                    <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '8px' }}>{kpi.label}</div>
-                    <div style={{ fontSize: '28px', fontWeight: '600', color: kpi.color }}>{kpi.valor}</div>
+                    <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '8px' }}>{kpi.icon} {kpi.label}</div>
+                    <div style={{ fontSize: '28px', fontWeight: '600', color: kpi.color }}>
+                      {cargando ? '...' : kpi.valor}
+                    </div>
                   </div>
                 ))}
               </div>
-              <div style={{ background: 'white', borderRadius: '12px', padding: '30px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
-                <div style={{ fontSize: '40px', marginBottom: '12px' }}>📥</div>
-                <div style={{ fontSize: '16px', fontWeight: '500', marginBottom: '8px' }}>Importá tus datos para comenzar</div>
-                <div style={{ fontSize: '13px', color: '#64748B', marginBottom: '20px' }}>Andá a "Importar datos" y cargá tu Excel de colaboradores</div>
-                <button onClick={() => setPagina('importar')} style={{ background: '#5B4EE8', color: 'white', border: 'none', padding: '10px 24px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px' }}>
-                  Ir a Importar datos →
-                </button>
-              </div>
+
+              {/* Mensaje si no hay datos */}
+              {stats.colaboradores === 0 && !cargando && (
+                <div style={{ background: 'white', borderRadius: '12px', padding: '30px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                  <div style={{ fontSize: '40px', marginBottom: '12px' }}>📥</div>
+                  <div style={{ fontSize: '16px', fontWeight: '500', marginBottom: '8px' }}>Importá tus datos para comenzar</div>
+                  <div style={{ fontSize: '13px', color: '#64748B', marginBottom: '20px' }}>Andá a "Importar datos" y cargá tu Excel de colaboradores</div>
+                  <button onClick={() => irA('importar')} style={{ background: '#5B4EE8', color: 'white', border: 'none', padding: '10px 24px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px' }}>
+                    Ir a Importar datos →
+                  </button>
+                </div>
+              )}
+
+              {/* Resumen si hay datos */}
+              {stats.colaboradores > 0 && (
+                <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                  <div style={{ fontSize: '15px', fontWeight: '500', marginBottom: '16px', color: '#1E293B' }}>
+                    ✅ Sistema activo — {stats.colaboradores} colaboradores cargados
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+                    {[
+                      { label: 'Registrar capacitación', icon: '🎓', pagina: 'capacitaciones' },
+                      { label: 'Ver presupuesto', icon: '💰', pagina: 'presupuesto' },
+                      { label: 'Gestionar traslados', icon: '↔️', pagina: 'traslados' },
+                    ].map(acc => (
+                      <div
+                        key={acc.label}
+                        onClick={() => irA(acc.pagina)}
+                        style={{ padding: '16px', background: '#F8FAFC', borderRadius: '10px', cursor: 'pointer', border: '1px solid #E2E8F0', textAlign: 'center' }}
+                      >
+                        <div style={{ fontSize: '24px', marginBottom: '6px' }}>{acc.icon}</div>
+                        <div style={{ fontSize: '13px', color: '#5B4EE8', fontWeight: '500' }}>{acc.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -124,7 +174,7 @@ export default function App() {
           {!['dashboard', 'importar'].includes(pagina) && (
             <div style={{ background: 'white', borderRadius: '12px', padding: '40px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
               <div style={{ fontSize: '40px', marginBottom: '12px' }}>🚧</div>
-              <div style={{ fontSize: '16px', fontWeight: '500', marginBottom: '8px', textTransform: 'capitalize' }}>
+              <div style={{ fontSize: '16px', fontWeight: '500', marginBottom: '8px' }}>
                 Módulo: {pagina}
               </div>
               <div style={{ fontSize: '13px', color: '#64748B' }}>Este módulo se construye en el siguiente paso</div>
