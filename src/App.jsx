@@ -212,3 +212,58 @@ export default function App() {
                   { label: 'Presupuesto (CR)',    valor: '₡' + stats.presupuesto.toLocaleString(), color: '#DC2626', icon: '💰', sub: 'ejecutado',   dest: 'presupuesto' },
                 ].map(kpi => (
                   <div key={kpi.label} onClick={() => irA(kpi.dest)}
+                    style={{ background: 'white', borderRadius: '12px', padding: '18px', borderLeft: `4px solid ${kpi.color}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', cursor: 'pointer' }}>
+                    <div style={{ fontSize: '11px', color: '#64748B', marginBottom: '6px' }}>{kpi.icon} {kpi.label}</div>
+                    <div style={{ fontSize: '24px', fontWeight: '600', color: kpi.color }}>
+                      {cargando ? '...' : kpi.valor}
+                    </div>
+                    <div style={{ fontSize: '10px', color: '#94A3B8', marginTop: '4px' }}>{kpi.sub}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Accesos rápidos */}
+              <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                <div style={{ fontSize: '14px', fontWeight: '500', marginBottom: '16px', color: '#1E293B' }}>
+                  Acciones rápidas
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
+                  {[
+                    { label: 'Nueva capacitación',    icon: '🎓', pagina: 'capacitaciones' },
+                    { label: 'Agregar participante',  icon: '👥', pagina: 'participantes' },
+                    { label: 'Generar reportes',      icon: '📄', pagina: 'reportes' },
+                    { label: 'Carga masiva',          icon: '📤', pagina: 'importar-capacitaciones' },
+                  ].map(acc => (
+                    <div key={acc.label} onClick={() => irA(acc.pagina)}
+                      style={{ padding: '16px', background: '#F8FAFC', borderRadius: '10px', cursor: 'pointer', border: '1px solid #E2E8F0', textAlign: 'center' }}>
+                      <div style={{ fontSize: '24px', marginBottom: '6px' }}>{acc.icon}</div>
+                      <div style={{ fontSize: '13px', color: '#5B4EE8', fontWeight: '500' }}>{acc.label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {pagina === 'colaboradores'           && <Colaboradores />}
+          {pagina === 'capacitaciones'          && <Capacitaciones onCambio={cargarStats} />}
+          {pagina === 'presupuesto'             && <Presupuesto onCambio={cargarStats} />}
+          {pagina === 'traslados'               && <Traslados onCambio={cargarStats} />}
+          {pagina === 'participantes'           && <Participantes onCambio={cargarStats} />}
+          {pagina === 'reportes'                && <Reportes />}
+          {pagina === 'importar'                && <Importar onImportado={cargarStats} />}
+          {pagina === 'importar-capacitaciones' && <ImportarCapacitaciones onImportado={cargarStats} />}
+
+          {!paginasActivas.includes(pagina) && (
+            <div style={{ background: 'white', borderRadius: '12px', padding: '40px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+              <div style={{ fontSize: '40px', marginBottom: '12px' }}>🚧</div>
+              <div style={{ fontSize: '16px', fontWeight: '500', marginBottom: '8px' }}>Módulo: {pagina}</div>
+              <div style={{ fontSize: '13px', color: '#64748B' }}>Este módulo se construye en el siguiente paso</div>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  )
+}
