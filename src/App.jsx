@@ -7,6 +7,7 @@ import Presupuesto from './pages/Presupuesto.jsx'
 import Traslados from './pages/Traslados.jsx'
 import Participantes from './pages/Participantes.jsx'
 import Reportes from './pages/Reportes.jsx'
+import ImportarCapacitaciones from './pages/ImportarCapacitaciones.jsx'
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -44,14 +45,15 @@ export default function App() {
   }
 
   const menuItems = [
-    { id: 'dashboard',      label: '📊 Dashboard' },
-    { id: 'capacitaciones', label: '🎓 Capacitaciones' },
-    { id: 'participantes',  label: '👥 Participantes' },
-    { id: 'presupuesto',    label: '💰 Presupuesto' },
-    { id: 'traslados',      label: '↔️ Traslados' },
-    { id: 'colaboradores',  label: '📋 Colaboradores' },
-    { id: 'reportes',       label: '📄 Reportes' },
-    { id: 'importar',       label: '📥 Importar datos' },
+    { id: 'dashboard',              label: '📊 Dashboard' },
+    { id: 'capacitaciones',         label: '🎓 Capacitaciones' },
+    { id: 'participantes',          label: '👥 Participantes' },
+    { id: 'presupuesto',            label: '💰 Presupuesto' },
+    { id: 'traslados',              label: '↔️ Traslados' },
+    { id: 'colaboradores',          label: '📋 Colaboradores' },
+    { id: 'reportes',               label: '📄 Reportes' },
+    { id: 'importar',               label: '📥 Importar colaboradores' },
+    { id: 'importar-capacitaciones',label: '📤 Importar capacitaciones' },
   ]
 
   function irA(id) {
@@ -60,16 +62,16 @@ export default function App() {
   }
 
   const paginasActivas = [
-    'dashboard', 'importar', 'colaboradores',
-    'capacitaciones', 'presupuesto', 'traslados',
-    'participantes', 'reportes'
+    'dashboard', 'importar', 'colaboradores', 'capacitaciones',
+    'presupuesto', 'traslados', 'participantes', 'reportes',
+    'importar-capacitaciones'
   ]
 
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: 'Arial, sans-serif' }}>
 
       {/* Menú lateral */}
-      <div style={{ width: '220px', background: '#1B2560', color: 'white', padding: '20px 0', flexShrink: 0 }}>
+      <div style={{ width: '230px', background: '#1B2560', color: 'white', padding: '20px 0', flexShrink: 0, overflowY: 'auto' }}>
         <div style={{ padding: '0 20px 20px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
           <div style={{ fontSize: '18px', fontWeight: 'bold' }}>
             <span style={{ color: '#F59E0B' }}>Control</span>Cap
@@ -82,7 +84,7 @@ export default function App() {
           {menuItems.map(item => (
             <div key={item.id} onClick={() => irA(item.id)}
               style={{
-                padding: '10px 20px', cursor: 'pointer',
+                padding: '9px 20px', cursor: 'pointer',
                 background: pagina === item.id ? 'rgba(255,255,255,0.15)' : 'transparent',
                 borderLeft: pagina === item.id ? '3px solid #F59E0B' : '3px solid transparent',
                 fontSize: '13px',
@@ -141,10 +143,10 @@ export default function App() {
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
                     {[
-                      { label: 'Ver colaboradores',    icon: '📋', pagina: 'colaboradores' },
-                      { label: 'Nueva capacitación',   icon: '🎓', pagina: 'capacitaciones' },
-                      { label: 'Agregar participante', icon: '👥', pagina: 'participantes' },
-                      { label: 'Generar reportes',     icon: '📄', pagina: 'reportes' },
+                      { label: 'Nueva capacitación',    icon: '🎓', pagina: 'capacitaciones' },
+                      { label: 'Agregar participante',  icon: '👥', pagina: 'participantes' },
+                      { label: 'Generar reportes',      icon: '📄', pagina: 'reportes' },
+                      { label: 'Carga masiva',          icon: '📤', pagina: 'importar-capacitaciones' },
                     ].map(acc => (
                       <div key={acc.label} onClick={() => irA(acc.pagina)}
                         style={{ padding: '16px', background: '#F8FAFC', borderRadius: '10px', cursor: 'pointer', border: '1px solid #E2E8F0', textAlign: 'center' }}>
@@ -168,13 +170,14 @@ export default function App() {
             </div>
           )}
 
-          {pagina === 'colaboradores'  && <Colaboradores />}
-          {pagina === 'capacitaciones' && <Capacitaciones onCambio={cargarStats} />}
-          {pagina === 'presupuesto'    && <Presupuesto onCambio={cargarStats} />}
-          {pagina === 'traslados'      && <Traslados onCambio={cargarStats} />}
-          {pagina === 'participantes'  && <Participantes onCambio={cargarStats} />}
-          {pagina === 'reportes'       && <Reportes />}
-          {pagina === 'importar'       && <Importar onImportado={cargarStats} />}
+          {pagina === 'colaboradores'           && <Colaboradores />}
+          {pagina === 'capacitaciones'          && <Capacitaciones onCambio={cargarStats} />}
+          {pagina === 'presupuesto'             && <Presupuesto onCambio={cargarStats} />}
+          {pagina === 'traslados'               && <Traslados onCambio={cargarStats} />}
+          {pagina === 'participantes'           && <Participantes onCambio={cargarStats} />}
+          {pagina === 'reportes'                && <Reportes />}
+          {pagina === 'importar'                && <Importar onImportado={cargarStats} />}
+          {pagina === 'importar-capacitaciones' && <ImportarCapacitaciones onImportado={cargarStats} />}
 
           {!paginasActivas.includes(pagina) && (
             <div style={{ background: 'white', borderRadius: '12px', padding: '40px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
