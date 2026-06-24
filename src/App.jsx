@@ -5,6 +5,7 @@ import Colaboradores from './pages/Colaboradores.jsx'
 import Capacitaciones from './pages/Capacitaciones.jsx'
 import Presupuesto from './pages/Presupuesto.jsx'
 import Traslados from './pages/Traslados.jsx'
+import Participantes from './pages/Participantes.jsx'
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -57,7 +58,10 @@ export default function App() {
     if (id === 'dashboard') cargarStats()
   }
 
-  const paginasActivas = ['dashboard','importar','colaboradores','capacitaciones','presupuesto','traslados']
+  const paginasActivas = [
+    'dashboard', 'importar', 'colaboradores',
+    'capacitaciones', 'presupuesto', 'traslados', 'participantes'
+  ]
 
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: 'Arial, sans-serif' }}>
@@ -114,9 +118,9 @@ export default function App() {
               {/* KPIs */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
                 {[
-                  { label: 'Capacitaciones', valor: stats.capacitaciones, color: '#5B4EE8', icon: '🎓', pagina: 'capacitaciones' },
-                  { label: 'Participantes',  valor: stats.participantes,  color: '#0F9B72', icon: '👥', pagina: 'participantes' },
-                  { label: 'Colaboradores',  valor: stats.colaboradores,  color: '#D97706', icon: '📋', pagina: 'colaboradores' },
+                  { label: 'Capacitaciones',       valor: stats.capacitaciones, color: '#5B4EE8', icon: '🎓', pagina: 'capacitaciones' },
+                  { label: 'Participantes',         valor: stats.participantes,  color: '#0F9B72', icon: '👥', pagina: 'participantes' },
+                  { label: 'Colaboradores',         valor: stats.colaboradores,  color: '#D97706', icon: '📋', pagina: 'colaboradores' },
                   { label: 'Presupuesto ejecutado', valor: '₡' + stats.presupuesto.toLocaleString(), color: '#DC2626', icon: '💰', pagina: 'presupuesto' },
                 ].map(kpi => (
                   <div key={kpi.label} onClick={() => irA(kpi.pagina)}
@@ -133,14 +137,14 @@ export default function App() {
               {stats.colaboradores > 0 && (
                 <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                   <div style={{ fontSize: '15px', fontWeight: '500', marginBottom: '16px', color: '#1E293B' }}>
-                    ✅ Sistema activo — {stats.colaboradores} colaboradores cargados
+                    ✅ Sistema activo — {stats.colaboradores} colaboradores · {stats.capacitaciones} capacitaciones · {stats.participantes} participantes
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
                     {[
                       { label: 'Ver colaboradores',   icon: '📋', pagina: 'colaboradores' },
                       { label: 'Nueva capacitación',  icon: '🎓', pagina: 'capacitaciones' },
+                      { label: 'Agregar participante', icon: '👥', pagina: 'participantes' },
                       { label: 'Control presupuesto', icon: '💰', pagina: 'presupuesto' },
-                      { label: 'Traslados',           icon: '↔️', pagina: 'traslados' },
                     ].map(acc => (
                       <div key={acc.label} onClick={() => irA(acc.pagina)}
                         style={{ padding: '16px', background: '#F8FAFC', borderRadius: '10px', cursor: 'pointer', border: '1px solid #E2E8F0', textAlign: 'center' }}>
@@ -168,6 +172,7 @@ export default function App() {
           {pagina === 'capacitaciones' && <Capacitaciones onCambio={cargarStats} />}
           {pagina === 'presupuesto'    && <Presupuesto onCambio={cargarStats} />}
           {pagina === 'traslados'      && <Traslados onCambio={cargarStats} />}
+          {pagina === 'participantes'  && <Participantes onCambio={cargarStats} />}
           {pagina === 'importar'       && <Importar onImportado={cargarStats} />}
 
           {!paginasActivas.includes(pagina) && (
