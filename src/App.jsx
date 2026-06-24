@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import Importar from './pages/Importar.jsx'
+import Colaboradores from './pages/Colaboradores.jsx'
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -97,10 +98,8 @@ export default function App() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             {pagina === 'dashboard' && (
-              <button
-                onClick={cargarStats}
-                style={{ background: '#EEF0FF', color: '#5B4EE8', border: 'none', padding: '6px 14px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500' }}
-              >
+              <button onClick={cargarStats}
+                style={{ background: '#EEF0FF', color: '#5B4EE8', border: 'none', padding: '6px 14px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500' }}>
                 {cargando ? '⏳ Cargando...' : '🔄 Actualizar'}
               </button>
             )}
@@ -113,7 +112,6 @@ export default function App() {
 
           {pagina === 'dashboard' && (
             <div>
-              {/* KPIs */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
                 {[
                   { label: 'Capacitaciones', valor: stats.capacitaciones, color: '#5B4EE8', icon: '🎓' },
@@ -130,19 +128,6 @@ export default function App() {
                 ))}
               </div>
 
-              {/* Mensaje si no hay datos */}
-              {stats.colaboradores === 0 && !cargando && (
-                <div style={{ background: 'white', borderRadius: '12px', padding: '30px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
-                  <div style={{ fontSize: '40px', marginBottom: '12px' }}>📥</div>
-                  <div style={{ fontSize: '16px', fontWeight: '500', marginBottom: '8px' }}>Importá tus datos para comenzar</div>
-                  <div style={{ fontSize: '13px', color: '#64748B', marginBottom: '20px' }}>Andá a "Importar datos" y cargá tu Excel de colaboradores</div>
-                  <button onClick={() => irA('importar')} style={{ background: '#5B4EE8', color: 'white', border: 'none', padding: '10px 24px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px' }}>
-                    Ir a Importar datos →
-                  </button>
-                </div>
-              )}
-
-              {/* Resumen si hay datos */}
               {stats.colaboradores > 0 && (
                 <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                   <div style={{ fontSize: '15px', fontWeight: '500', marginBottom: '16px', color: '#1E293B' }}>
@@ -150,15 +135,12 @@ export default function App() {
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
                     {[
+                      { label: 'Ver colaboradores', icon: '📋', pagina: 'colaboradores' },
                       { label: 'Registrar capacitación', icon: '🎓', pagina: 'capacitaciones' },
-                      { label: 'Ver presupuesto', icon: '💰', pagina: 'presupuesto' },
-                      { label: 'Gestionar traslados', icon: '↔️', pagina: 'traslados' },
+                      { label: 'Control presupuesto', icon: '💰', pagina: 'presupuesto' },
                     ].map(acc => (
-                      <div
-                        key={acc.label}
-                        onClick={() => irA(acc.pagina)}
-                        style={{ padding: '16px', background: '#F8FAFC', borderRadius: '10px', cursor: 'pointer', border: '1px solid #E2E8F0', textAlign: 'center' }}
-                      >
+                      <div key={acc.label} onClick={() => irA(acc.pagina)}
+                        style={{ padding: '16px', background: '#F8FAFC', borderRadius: '10px', cursor: 'pointer', border: '1px solid #E2E8F0', textAlign: 'center' }}>
                         <div style={{ fontSize: '24px', marginBottom: '6px' }}>{acc.icon}</div>
                         <div style={{ fontSize: '13px', color: '#5B4EE8', fontWeight: '500' }}>{acc.label}</div>
                       </div>
@@ -166,12 +148,23 @@ export default function App() {
                   </div>
                 </div>
               )}
+
+              {stats.colaboradores === 0 && !cargando && (
+                <div style={{ background: 'white', borderRadius: '12px', padding: '30px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                  <div style={{ fontSize: '40px', marginBottom: '12px' }}>📥</div>
+                  <div style={{ fontSize: '16px', fontWeight: '500', marginBottom: '8px' }}>Importá tus datos para comenzar</div>
+                  <button onClick={() => irA('importar')} style={{ background: '#5B4EE8', color: 'white', border: 'none', padding: '10px 24px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px' }}>
+                    Ir a Importar datos →
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
+          {pagina === 'colaboradores' && <Colaboradores />}
           {pagina === 'importar' && <Importar onImportado={cargarStats} />}
 
-          {!['dashboard', 'importar'].includes(pagina) && (
+          {!['dashboard', 'importar', 'colaboradores'].includes(pagina) && (
             <div style={{ background: 'white', borderRadius: '12px', padding: '40px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
               <div style={{ fontSize: '40px', marginBottom: '12px' }}>🚧</div>
               <div style={{ fontSize: '16px', fontWeight: '500', marginBottom: '8px' }}>
