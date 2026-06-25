@@ -75,6 +75,14 @@ export default function ImportarCapacitaciones() {
     return base
   }
 
+  function limpiarGenero(valor) {
+    if (!valor) return null
+    const g = valor.toString().trim().toUpperCase()
+    if (g.includes('FEM') || g === 'F') return 'FEMENINO'
+    if (g.includes('MAS') || g === 'M') return 'MASCULINO'
+    return null
+  }
+
   async function procesarArchivo(e) {
     const archivo = e.target.files[0]
     if (!archivo) return
@@ -164,7 +172,7 @@ export default function ImportarCapacitaciones() {
     colsDB?.forEach(c => colIdMap.set(c.correo.toLowerCase().trim(), c.id))
     addLog(`✅ ${colIdMap.size} colaboradores en el sistema`)
 
-    // ── PASO 4: Crear participantes con horas por fila ───────────
+    // ── PASO 4: Crear participantes con horas y género ───────────
     addLog('👤 Paso 4: Procesando participantes...')
 
     const participantesLote = []
@@ -178,6 +186,7 @@ export default function ImportarCapacitaciones() {
       const nombreColab = (fila['Colab '] || fila['Colaborador'] || '').toString().trim()
       const correoRaw = (fila['Correo'] || '').toString().trim().toLowerCase()
       const horasFila = Number(fila['Horas capacitación']) || 0
+      const generoFila = limpiarGenero(fila['Género'])
 
       const capId = capIdMap.get(nombreCap)
       if (!capId) { sinCap++; continue }
@@ -197,6 +206,7 @@ export default function ImportarCapacitaciones() {
         capacitacion_id: capId,
         correo: correo,
         horas: horasFila,
+        genero: generoFila,
       })
     }
 
@@ -205,7 +215,6 @@ export default function ImportarCapacitaciones() {
     if (sinColab > 0) addLog(`⚠️ ${sinColab} participantes ya no están en la organización (se importan igual)`, 'warn')
     if (sinCap > 0) addLog(`⚠️ ${sinCap} filas con capacitación no encontrada (se omiten)`, 'warn')
 
-    // ── INSERT directo sin upsert para respetar las horas ────────
     let partInsertados = 0
 
     for (let i = 0; i < participantesLote.length; i += 100) {
@@ -253,7 +262,7 @@ export default function ImportarCapacitaciones() {
         <label
           htmlFor="fileCapInput"
           style={{
-            background: estado === 'procesando' ? '#E2E8F0' : '#5B4EE8',
+            background: estado === 'procesando' ? '#E2E8F0' : '#8131B0',
             color: estado === 'procesando' ? '#94A3B8' : 'white',
             padding: '10px 24px', borderRadius: '8px',
             cursor: estado === 'procesando' ? 'not-allowed' : 'pointer',
@@ -270,7 +279,7 @@ export default function ImportarCapacitaciones() {
             <span>{progreso}%</span>
           </div>
           <div style={{ background: '#E2E8F0', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
-            <div style={{ background: '#5B4EE8', height: '100%', width: `${progreso}%`, borderRadius: '4px', transition: 'width 0.3s' }} />
+            <div style={{ background: '#8131B0', height: '100%', width: `${progreso}%`, borderRadius: '4px', transition: 'width 0.3s' }} />
           </div>
         </div>
       )}
