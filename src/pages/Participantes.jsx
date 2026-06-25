@@ -6,10 +6,17 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 )
 
+const ANIOS = ['2026', '2025', '2024', '2023', '2022', '2021']
+const POR_PAGINA = 100
+
 export default function Participantes({ onCambio }) {
   const [participantes, setParticipantes] = useState([])
+  const [totalCount, setTotalCount] = useState(0)
   const [capacitaciones, setCapacitaciones] = useState([])
   const [colaboradores, setColaboradores] = useState([])
+  const [capMap, setCapMap] = useState({})
+  const [colByIdMap, setColByIdMap] = useState({})
+  const [colByCorreoMap, setColByCorreoMap] = useState({})
   const [modal, setModal] = useState(false)
   const [busquedaColab, setBusquedaColab] = useState('')
   const [resultados, setResultados] = useState([])
@@ -17,45 +24,118 @@ export default function Participantes({ onCambio }) {
   const [guardando, setGuardando] = useState(false)
   const [exito, setExito] = useState('')
   const [filtroCap, setFiltroCap] = useState('')
-  const [filtroAnio, setFiltroAnio] = useState('')
+  const [filtroAnio, setFiltroAnio] = useState('2026')
   const [busqueda, setBusqueda] = useState('')
-  const [cargando, setCargando] = useState(true)
+  const [pagina, setPagina] = useState(0)
+  const [cargando, setCargando] = useState(false)
 
-  useEffect(() => { cargar() }, [])
+  useEffect(() => { cargarCatalogos() }, [])
+  useEffect(() => { setPagina(0); buscarParticipantes(0) }, [filtroAnio, filtroCap, busqueda])
+  useEffect(() => { if (pagina > 0) buscarParticipantes(pagina) }, [pagina])
 
-  async function cargar() {
-    setCargando(true)
-
-    const [pRes, cRes, colRes] = await Promise.all([
-      supabase.from('participantes').select('*').order('created_at', { ascending: false }).limit(2000),
+  async function cargarCatalogos() {
+    const [cRes, colRes] = await Promise.all([
       supabase.from('capacitaciones').select('id, nombre, horas, fecha_inicio').order('nombre'),
       supabase.from('colaboradores').select('id, nombre, correo, gerencia, departamento, puesto').order('nombre')
     ])
 
     const caps = cRes.data || []
     const cols = colRes.data || []
-    const parts = pRes.data || []
 
-    const capMap = {}
-    caps.forEach(c => { capMap[c.id] = c })
+    const cMap = {}
+    caps.forEach(c => { cMap[c.id] = c })
 
-    const colByIdMap = {}
-    const colByCorreoMap = {}
+    const cById = {}, cByCorreo = {}
     cols.forEach(c => {
-      colByIdMap[c.id] = c
-      if (c.correo) colByCorreoMap[c.correo.toLowerCase().trim()] = c
+      cById[c.id] = c
+      if (c.correo) cByCorreo[c.correo.toLowerCase().trim()] = c
     })
 
-    const enriquecidos = parts.map(p => {
+    setCapacitaciones(caps)
+    setColaboradores(cols)
+    setCapMap(cMap)
+    setColByIdMap(cById)
+    setColByCorreoMap(cByCorreo)
+  }
+
+  async function buscarParticipantes(pag) {
+    setCargando(true)
+    const desde = pag * POR_PAGINA
+    const hasta = desde + POR_PAGINA - 1
+
+    // Construir query base
+    let q = supabase
+      .from('participantes')
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(desde, hasta)
+
+    // Filtro por año: buscar capacitaciones del año seleccionado
+    if (filtroAnio) {
+      const inicioAnio = `${filtroAnio}-01-01`
+      const finAnio = `${filtroAnio}-12-31`
+      // Obtener IDs de capacitaciones del año
+      const { data: capsAnio } = await supabase
+        .from('capacitaciones')
+        .select('id')
+        .gte('fecha_inicio', inicioAnio)
+        .lte('fecha_inicio', finAnio)
+
+      if (capsAnio && capsAnio.length > 0) {
+        const ids = capsAnio.map(c => c.id)
+        q = q.in('capacitacion_id', ids)
+      } else {
+        setParticipantes([])
+        setTotalCount(0)
+        setCargando(false)
+        return
+      }
+    }
+
+    // Filtro por capacitación específica
+    if (filtroCap) {
+      q = q.eq('capacitacion_id', filtroCap)
+    }
+
+    // Filtro por búsqueda de correo
+    if (busqueda && busqueda.includes('@')) {
+      q = q.ilike('correo', `%${busqueda}%`)
+    }
+
+    const { data, count, error } = await q
+
+    if (error) {
+      console.error('Error cargando participantes:', error)
+      setCargando(false)
+      return
+    }
+
+    // Enriquecer con datos de catálogos
+    const enriquecidos = (data || []).map(p => {
       const cap = capMap[p.capacitacion_id] || null
       const col = colByIdMap[p.colaborador_id] || colByCorreoMap[p.correo?.toLowerCase().trim()] || null
       const anio = cap?.fecha_inicio ? new Date(cap.fecha_inicio).getFullYear() : null
       return { ...p, _cap: cap, _col: col, _anio: anio }
     })
 
-    setParticipantes(enriquecidos)
-    setCapacitaciones(caps)
-    setColaboradores(cols)
+    // Filtro por nombre/gerencia (client-side para los resultados de esta página)
+    let resultado = enriquecidos
+    if (busqueda && !busqueda.includes('@')) {
+      const t = busqueda.toLowerCase()
+      resultado = enriquecidos.filter(p =>
+        (p._col?.nombre || '').toLowerCase().includes(t) ||
+        (p.correo || '').toLowerCase().includes(t) ||
+        (p._cap?.nombre || '').toLowerCase().includes(t) ||
+        (p._col?.gerencia || '').toLowerCase().includes(t)
+      )
+    }
+
+    if (pag === 0) {
+      setParticipantes(resultado)
+    } else {
+      setParticipantes(prev => [...prev, ...resultado])
+    }
+    setTotalCount(count || 0)
     setCargando(false)
   }
 
@@ -70,30 +150,8 @@ export default function Participantes({ onCambio }) {
     )
   }, [busquedaColab, colaboradores])
 
-  const filtrados = participantes.filter(p => {
-    const matchCap = !filtroCap || p.capacitacion_id === filtroCap
-    const matchAnio = !filtroAnio || p._anio === parseInt(filtroAnio)
-    if (!busqueda) return matchCap && matchAnio
-    const t = busqueda.toLowerCase()
-    const nombre = (p._col?.nombre || '').toLowerCase()
-    const correo = (p.correo || '').toLowerCase()
-    const cap = (p._cap?.nombre || '').toLowerCase()
-    const gerencia = (p._col?.gerencia || '').toLowerCase()
-    return matchCap && matchAnio && (
-      nombre.includes(t) ||
-      correo.includes(t) ||
-      cap.includes(t) ||
-      gerencia.includes(t)
-    )
-  })
-
   async function agregar(colaborador) {
     if (!capSeleccionada) { alert('Seleccioná una capacitación primero'); return }
-    const yaExiste = participantes.find(
-      p => p.colaborador_id === colaborador.id && p.capacitacion_id === capSeleccionada
-    )
-    if (yaExiste) { alert('Este colaborador ya está en esa capacitación'); return }
-
     const cap = capacitaciones.find(c => c.id === capSeleccionada)
     setGuardando(true)
     const { error } = await supabase.from('participantes').insert([{
@@ -107,7 +165,8 @@ export default function Participantes({ onCambio }) {
       setExito(`✅ ${colaborador.nombre} agregado correctamente`)
       setBusquedaColab('')
       setResultados([])
-      cargar()
+      setPagina(0)
+      buscarParticipantes(0)
       if (onCambio) onCambio()
       setTimeout(() => setExito(''), 3000)
     } else {
@@ -133,7 +192,9 @@ export default function Participantes({ onCambio }) {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <div style={{ fontSize: '13px', color: '#64748B' }}>
-          {cargando ? 'Cargando...' : `${filtrados.length} participantes${hayFiltros ? ' (filtrados)' : ''}`}
+          {cargando
+            ? 'Cargando...'
+            : `${participantes.length} de ${totalCount.toLocaleString()} participantes`}
         </div>
         <button onClick={() => setModal(true)}
           style={{ background: '#8131B0', color: 'white', border: 'none', padding: '8px 18px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>
@@ -151,11 +212,9 @@ export default function Participantes({ onCambio }) {
           style={{ ...inp, width: '280px' }}
         />
         <select value={filtroAnio} onChange={e => setFiltroAnio(e.target.value)}
-          style={{ ...inp, width: '110px' }}>
+          style={{ ...inp, width: '120px' }}>
           <option value="">Todos los años</option>
-          {['2026','2025','2024','2023','2022','2021'].map(a => (
-            <option key={a} value={a}>{a}</option>
-          ))}
+          {ANIOS.map(a => <option key={a} value={a}>{a}</option>)}
         </select>
         <select value={filtroCap} onChange={e => setFiltroCap(e.target.value)}
           style={{ ...inp, width: '300px' }}>
@@ -165,7 +224,7 @@ export default function Participantes({ onCambio }) {
             .map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
         </select>
         {hayFiltros && (
-          <button onClick={() => { setFiltroCap(''); setFiltroAnio(''); setBusqueda('') }}
+          <button onClick={() => { setFiltroCap(''); setFiltroAnio('2026'); setBusqueda('') }}
             style={{ ...inp, width: 'auto', padding: '0 14px', cursor: 'pointer', color: '#64748B' }}>
             ✕ Limpiar
           </button>
@@ -174,13 +233,13 @@ export default function Participantes({ onCambio }) {
 
       {/* Tabla */}
       <div style={{ background: 'white', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', overflow: 'hidden' }}>
-        {cargando ? (
+        {cargando && participantes.length === 0 ? (
           <div style={{ padding: '40px', textAlign: 'center', color: '#94A3B8' }}>Cargando participantes...</div>
-        ) : filtrados.length === 0 ? (
+        ) : participantes.length === 0 ? (
           <div style={{ padding: '50px', textAlign: 'center', color: '#94A3B8' }}>
             <div style={{ fontSize: '32px', marginBottom: '10px' }}>👥</div>
             <div style={{ fontWeight: '500', marginBottom: '6px' }}>No hay participantes</div>
-            <div style={{ fontSize: '13px' }}>Ajustá los filtros o agregá colaboradores a una capacitación</div>
+            <div style={{ fontSize: '13px' }}>Ajustá los filtros para ver resultados</div>
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
@@ -193,7 +252,7 @@ export default function Participantes({ onCambio }) {
                 </tr>
               </thead>
               <tbody>
-                {filtrados.slice(0, 200).map((p, i) => {
+                {participantes.map((p, i) => {
                   const correoMostrar = (!p.correo || p.correo.startsWith('sin-correo__')) ? '—' : p.correo
                   return (
                     <tr key={p.id} style={{ background: i % 2 === 0 ? 'white' : '#FAFAFA' }}>
@@ -212,9 +271,16 @@ export default function Participantes({ onCambio }) {
                 })}
               </tbody>
             </table>
-            {filtrados.length > 200 && (
-              <div style={{ padding: '12px', textAlign: 'center', fontSize: '12px', color: '#94A3B8', borderTop: '1px solid #E2E8F0' }}>
-                Mostrando 200 de {filtrados.length}. Usá los filtros para reducir resultados.
+
+            {/* Cargar más */}
+            {participantes.length < totalCount && (
+              <div style={{ padding: '16px', textAlign: 'center', borderTop: '1px solid #E2E8F0' }}>
+                <button
+                  onClick={() => setPagina(prev => prev + 1)}
+                  disabled={cargando}
+                  style={{ background: '#8131B0', color: 'white', border: 'none', padding: '8px 24px', borderRadius: '8px', cursor: cargando ? 'not-allowed' : 'pointer', fontSize: '13px' }}>
+                  {cargando ? 'Cargando...' : `Cargar más (${totalCount - participantes.length} restantes)`}
+                </button>
               </div>
             )}
           </div>
