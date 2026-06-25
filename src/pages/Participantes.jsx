@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
@@ -7,9 +7,11 @@ const supabase = createClient(
 )
 
 const ANIOS = ['2026', '2025', '2024', '2023', '2022', '2021']
+const POR_PAGINA = 200
 
 export default function Participantes({ onCambio }) {
   const [participantes, setParticipantes] = useState([])
+  const [totalCount, setTotalCount] = useState(0)
   const [capacitaciones, setCapacitaciones] = useState([])
   const [colaboradores, setColaboradores] = useState([])
   const [capMap, setCapMap] = useState({})
@@ -25,18 +27,12 @@ export default function Participantes({ onCambio }) {
   const [filtroAnio, setFiltroAnio] = useState('2026')
   const [busqueda, setBusqueda] = useState('')
   const [cargando, setCargando] = useState(true)
-  const [cargadoInicial, setCargadoInicial] = useState(false)
-  const [pagina, setPagina] = useState(0)
-  const [totalCount, setTotalCount] = useState(0)
-  const [rawParticipantes, setRawParticipantes] = useState([])
-
-  const POR_PAGINA = 200
+  const [paginaActual, setPaginaActual] = useState(0)
 
   useEffect(() => { cargarTodo() }, [])
 
   async function cargarTodo() {
     setCargando(true)
-
     const [cRes, colRes] = await Promise.all([
       supabase.from('capacitaciones').select('id, nombre, horas, fecha_inicio').order('nombre'),
       supabase.from('colaboradores').select('id, nombre, correo, gerencia, departamento, puesto').order('nombre')
@@ -47,7 +43,6 @@ export default function Participantes({ onCambio }) {
 
     const cMap = {}
     caps.forEach(c => { cMap[c.id] = c })
-
     const cById = {}, cByCorreo = {}
     cols.forEach(c => {
       cById[c.id] = c
@@ -60,34 +55,62 @@ export default function Participantes({ onCambio }) {
     setColByIdMap(cById)
     setColByCorreoMap(cByCorreo)
 
-    // Ahora cargar participantes con los mapas listos
-    await cargarParticipantes(0, 'default', cMap, cById, cByCorreo, caps)
-    setCargadoInicial(true)
+    await buscarConFiltros(0, '2026', '', '', cMap, cById, cByCorreo, caps, true)
     setCargando(false)
   }
 
-  async function cargarParticipantes(pag, anio, cMapRef, cByIdRef, cByCorreoRef, capsRef) {
-    const anioActual = anio === 'default' ? '2026' : anio
-    const capsDisp = capsRef || capacitaciones
-    const cMapDisp = cMapRef || capMap
-    const cByIdDisp = cByIdRef || colByIdMap
-    const cByCorreoDisp = cByCorreoRef || colByCorreoMap
+  async function buscarConFiltros(pag, anio, cap, busq, cMapR, cByIdR, cByCorreoR, capsR, reset) {
+    const cMapU = cMapR || capMap
+    const cByIdU = cByIdR || colByIdMap
+    const cByCorreoU = cByCorreoR || colByCorreoMap
+    const capsU = capsR || capacitaciones
 
     const desde = pag * POR_PAGINA
     const hasta = desde + POR_PAGINA - 1
 
+    // Obtener IDs de capacitaciones del año
     let capIds = null
-
-    if (anioActual) {
-      const capsAnio = capsDisp.filter(c => {
-        if (!c.fecha_inicio) return false
-        return new Date(c.fecha_inicio).getFullYear() === parseInt(anioActual)
-      })
+    if (anio) {
+      const capsAnio = capsU.filter(c => c.fecha_inicio && new Date(c.fecha_inicio).getFullYear() === parseInt(anio))
       if (capsAnio.length === 0) {
-        if (pag === 0) { setRawParticipantes([]); setTotalCount(0) }
+        setParticipantes([])
+        setTotalCount(0)
         return
       }
       capIds = capsAnio.map(c => c.id)
+    }
+
+    // Si hay búsqueda por texto, primero buscar correos que coincidan
+    let correosEncontrados = null
+    if (busq && busq.trim().length > 0) {
+      const t = busq.toLowerCase().trim()
+
+      // Buscar en colaboradores por nombre o gerencia
+      const colsMatch = Object.values(cByIdU).filter(c =>
+        c.nombre?.toLowerCase().includes(t) ||
+        c.gerencia?.toLowerCase().includes(t) ||
+        c.puesto?.toLowerCase().includes(t) ||
+        c.correo?.toLowerCase().includes(t)
+      )
+      correosEncontrados = colsMatch.map(c => c.correo?.toLowerCase().trim()).filter(Boolean)
+
+      // También incluir correos que coincidan directamente
+      if (t.includes('@') || t.length > 3) {
+        // Buscar en participantes por correo directamente
+        let qCorreo = supabase.from('participantes').select('correo').ilike('correo', `%${t}%`)
+        if (capIds) qCorreo = qCorreo.in('capacitacion_id', capIds)
+        const { data: pCorreos } = await qCorreo
+        if (pCorreos) {
+          const extras = pCorreos.map(p => p.correo?.toLowerCase().trim()).filter(Boolean)
+          correosEncontrados = [...new Set([...correosEncontrados, ...extras])]
+        }
+      }
+
+      if (correosEncontrados.length === 0) {
+        setParticipantes([])
+        setTotalCount(0)
+        return
+      }
     }
 
     let q = supabase
@@ -97,45 +120,36 @@ export default function Participantes({ onCambio }) {
       .range(desde, hasta)
 
     if (capIds) q = q.in('capacitacion_id', capIds)
-    if (filtroCap) q = q.eq('capacitacion_id', filtroCap)
+    if (cap) q = q.eq('capacitacion_id', cap)
+    if (correosEncontrados) q = q.in('correo', correosEncontrados)
 
     const { data, count } = await q
 
     const enriquecidos = (data || []).map(p => {
-      const cap = cMapDisp[p.capacitacion_id] || null
-      const col = cByIdDisp[p.colaborador_id] || cByCorreoDisp[p.correo?.toLowerCase().trim()] || null
-      const anioP = cap?.fecha_inicio ? new Date(cap.fecha_inicio).getFullYear() : null
-      return { ...p, _cap: cap, _col: col, _anio: anioP }
+      const c = cMapU[p.capacitacion_id] || null
+      const col = cByIdU[p.colaborador_id] || cByCorreoU[p.correo?.toLowerCase().trim()] || null
+      return { ...p, _cap: c, _col: col, _anio: c?.fecha_inicio ? new Date(c.fecha_inicio).getFullYear() : null }
     })
 
-    if (pag === 0) {
-      setRawParticipantes(enriquecidos)
+    if (reset || pag === 0) {
+      setParticipantes(enriquecidos)
     } else {
-      setRawParticipantes(prev => [...prev, ...enriquecidos])
+      setParticipantes(prev => [...prev, ...enriquecidos])
     }
     setTotalCount(count || 0)
+    setPaginaActual(pag)
   }
 
-  // Cuando cambian filtros de año o capacitación, recargar
+  // Debounce para búsqueda
   useEffect(() => {
-    if (!cargadoInicial) return
-    setCargando(true)
-    setPagina(0)
-    cargarParticipantes(0, filtroAnio, null, null, null, null).then(() => setCargando(false))
-  }, [filtroAnio, filtroCap])
-
-  // Filtro de búsqueda client-side
-  const filtrados = rawParticipantes.filter(p => {
-    if (!busqueda) return true
-    const t = busqueda.toLowerCase()
-    return (
-      (p._col?.nombre || '').toLowerCase().includes(t) ||
-      (p.correo || '').toLowerCase().includes(t) ||
-      (p._cap?.nombre || '').toLowerCase().includes(t) ||
-      (p._col?.gerencia || '').toLowerCase().includes(t) ||
-      (p._col?.puesto || '').toLowerCase().includes(t)
-    )
-  })
+    if (!capacitaciones.length) return
+    const timer = setTimeout(() => {
+      setCargando(true)
+      buscarConFiltros(0, filtroAnio, filtroCap, busqueda, null, null, null, null, true)
+        .then(() => setCargando(false))
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [busqueda, filtroAnio, filtroCap])
 
   useEffect(() => {
     if (!busquedaColab) { setResultados([]); return }
@@ -147,6 +161,13 @@ export default function Participantes({ onCambio }) {
       ).slice(0, 8)
     )
   }, [busquedaColab, colaboradores])
+
+  async function cargarMas() {
+    const nueva = paginaActual + 1
+    setCargando(true)
+    await buscarConFiltros(nueva, filtroAnio, filtroCap, busqueda, null, null, null, null, false)
+    setCargando(false)
+  }
 
   async function agregar(colaborador) {
     if (!capSeleccionada) { alert('Seleccioná una capacitación primero'); return }
@@ -163,21 +184,15 @@ export default function Participantes({ onCambio }) {
       setExito(`✅ ${colaborador.nombre} agregado correctamente`)
       setBusquedaColab('')
       setResultados([])
-      await cargarParticipantes(0, filtroAnio, null, null, null, null)
+      setCargando(true)
+      await buscarConFiltros(0, filtroAnio, filtroCap, busqueda, null, null, null, null, true)
+      setCargando(false)
       if (onCambio) onCambio()
       setTimeout(() => setExito(''), 3000)
     } else {
       alert('Error: ' + error.message)
     }
     setGuardando(false)
-  }
-
-  async function cargarMas() {
-    const nuevaPagina = pagina + 1
-    setPagina(nuevaPagina)
-    setCargando(true)
-    await cargarParticipantes(nuevaPagina, filtroAnio, null, null, null, null)
-    setCargando(false)
   }
 
   const inp = {
@@ -195,9 +210,7 @@ export default function Participantes({ onCambio }) {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <div style={{ fontSize: '13px', color: '#64748B' }}>
-          {cargando
-            ? 'Cargando...'
-            : `${filtrados.length}${busqueda ? '' : ` de ${totalCount.toLocaleString()}`} participantes`}
+          {cargando ? 'Buscando...' : `${participantes.length} de ${totalCount.toLocaleString()} participantes`}
         </div>
         <button onClick={() => setModal(true)}
           style={{ background: '#8131B0', color: 'white', border: 'none', padding: '8px 18px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>
@@ -208,10 +221,10 @@ export default function Participantes({ onCambio }) {
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
         <input
           type="text"
-          placeholder="🔍 Nombre, correo, capacitación, gerencia o puesto..."
+          placeholder="🔍 Nombre, correo, gerencia o puesto..."
           value={busqueda}
           onChange={e => setBusqueda(e.target.value)}
-          style={{ ...inp, width: '300px' }}
+          style={{ ...inp, width: '280px' }}
         />
         <select value={filtroAnio} onChange={e => { setFiltroAnio(e.target.value); setFiltroCap('') }}
           style={{ ...inp, width: '120px' }}>
@@ -234,9 +247,9 @@ export default function Participantes({ onCambio }) {
       </div>
 
       <div style={{ background: 'white', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', overflow: 'hidden' }}>
-        {cargando && rawParticipantes.length === 0 ? (
+        {cargando && participantes.length === 0 ? (
           <div style={{ padding: '40px', textAlign: 'center', color: '#94A3B8' }}>Cargando participantes...</div>
-        ) : filtrados.length === 0 ? (
+        ) : participantes.length === 0 ? (
           <div style={{ padding: '50px', textAlign: 'center', color: '#94A3B8' }}>
             <div style={{ fontSize: '32px', marginBottom: '10px' }}>👥</div>
             <div style={{ fontWeight: '500', marginBottom: '6px' }}>No hay participantes</div>
@@ -253,7 +266,7 @@ export default function Participantes({ onCambio }) {
                 </tr>
               </thead>
               <tbody>
-                {filtrados.map((p, i) => {
+                {participantes.map((p, i) => {
                   const correoMostrar = (!p.correo || p.correo.startsWith('sin-correo__')) ? '—' : p.correo
                   return (
                     <tr key={p.id} style={{ background: i % 2 === 0 ? 'white' : '#FAFAFA' }}>
@@ -272,11 +285,11 @@ export default function Participantes({ onCambio }) {
                 })}
               </tbody>
             </table>
-            {rawParticipantes.length < totalCount && !busqueda && (
+            {participantes.length < totalCount && (
               <div style={{ padding: '16px', textAlign: 'center', borderTop: '1px solid #E2E8F0' }}>
                 <button onClick={cargarMas} disabled={cargando}
                   style={{ background: '#8131B0', color: 'white', border: 'none', padding: '8px 24px', borderRadius: '8px', cursor: cargando ? 'not-allowed' : 'pointer', fontSize: '13px' }}>
-                  {cargando ? 'Cargando...' : `Cargar más (${totalCount - rawParticipantes.length} restantes)`}
+                  {cargando ? 'Cargando...' : `Cargar más (${totalCount - participantes.length} restantes)`}
                 </button>
               </div>
             )}
@@ -302,3 +315,43 @@ export default function Participantes({ onCambio }) {
               </div>
               <div>
                 <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }}>Buscar colaborador *</label>
+                <input
+                  type="text"
+                  placeholder="Escribí el nombre o correo..."
+                  value={busquedaColab}
+                  onChange={e => setBusquedaColab(e.target.value)}
+                  style={{ ...inp, width: '100%' }}
+                />
+              </div>
+              {resultados.length > 0 && (
+                <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
+                  {resultados.map((c, i) => (
+                    <div key={c.id} onClick={() => agregar(c)}
+                      style={{ padding: '10px 14px', cursor: 'pointer', fontSize: '13px', background: i % 2 === 0 ? 'white' : '#F8FAFC', borderBottom: i < resultados.length - 1 ? '1px solid #F1F5F9' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontWeight: '500', color: '#1E293B' }}>{c.nombre}</div>
+                        <div style={{ fontSize: '11px', color: '#94A3B8' }}>{c.correo} · {c.gerencia}</div>
+                      </div>
+                      <span style={{ background: '#EEF0FF', color: '#8131B0', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '500' }}>
+                        {guardando ? '...' : '+ Agregar'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {busquedaColab && resultados.length === 0 && (
+                <div style={{ fontSize: '13px', color: '#94A3B8', textAlign: 'center', padding: '10px' }}>No se encontraron colaboradores</div>
+              )}
+            </div>
+            <div style={{ padding: '16px 24px', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={() => { setModal(false); setBusquedaColab(''); setResultados([]) }}
+                style={{ padding: '8px 18px', border: '1px solid #E2E8F0', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', background: 'white' }}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
