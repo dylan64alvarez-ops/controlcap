@@ -172,7 +172,7 @@ export default function ImportarCapacitaciones() {
     colsDB?.forEach(c => colIdMap.set(c.correo.toLowerCase().trim(), c.id))
     addLog(`✅ ${colIdMap.size} colaboradores en el sistema`)
 
-    // ── PASO 4: Crear participantes con horas y género ───────────
+    // ── PASO 4: Crear participantes con horas, género y costo ────
     addLog('👤 Paso 4: Procesando participantes...')
 
     const participantesLote = []
@@ -187,6 +187,7 @@ export default function ImportarCapacitaciones() {
       const correoRaw = (fila['Correo'] || '').toString().trim().toLowerCase()
       const horasFila = Number(fila['Horas capacitación']) || 0
       const generoFila = limpiarGenero(fila['Género'])
+      const costoFila = Number(fila['Costo']) || 0
 
       const capId = capIdMap.get(nombreCap)
       if (!capId) { sinCap++; continue }
@@ -207,6 +208,7 @@ export default function ImportarCapacitaciones() {
         correo: correo,
         horas: horasFila,
         genero: generoFila,
+        costo: costoFila,
       })
     }
 
@@ -303,7 +305,7 @@ export default function ImportarCapacitaciones() {
           {[
             'Nombre Capacitación *', 'Des_Temas', 'Fecha Inicio', 'Fecha fin',
             'Horas capacitación *', 'Estado', 'Empresa', 'Facilitador',
-            'Correo (opcional)', 'Costo', 'Año', 'Género'
+            'Correo (opcional)', 'Costo', 'Género', 'Gerencia'
           ].map(c => (
             <div key={c} style={{ fontSize: '12px', color: '#64748B', display: 'flex', alignItems: 'center', gap: '5px' }}>
               <span style={{ color: c.includes('*') ? '#0F9B72' : '#CBD5E1' }}>●</span>{c}
