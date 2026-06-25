@@ -29,15 +29,15 @@ export default function App() {
   const [anio, setAnio] = useState('todos')
   const [stats, setStats] = useState({ capacitaciones: 0, colaboradores: 0, participantes: 0, horas: 0, presupuesto: 0 })
   const [cargando, setCargando] = useState(false)
-  const [graficas, setGraficas] = useState({ gerencias: [], generos: [], mensual: [] })
-  const [gerenciaSeleccionada, setGerenciaSeleccionada] = useState(null)
+  const [graficas, setGraficas] = useState({ gerenciasPartic: [], gerenciasHoras: [], generos: [], mensual: [] })
+  const [drillPartic, setDrillPartic] = useState(null)
+  const [drillHoras, setDrillHoras] = useState(null)
 
   useEffect(() => { cargarStats() }, [anio])
 
   async function cargarStats() {
     setCargando(true)
 
-    // KPIs
     let query = supabase.from('stats_por_anio').select('*')
     if (anio !== 'todos') query = query.eq('anio', parseInt(anio))
     const { data: statsData } = await query
@@ -75,7 +75,6 @@ export default function App() {
     const totalPre = preData?.reduce((s, r) => s + Number(r.importe), 0) || 0
     setStats({ capacitaciones, colaboradores, participantes, horas, presupuesto: totalPre })
 
-    // Gráficas desde vista
     await cargarGraficas()
     setCargando(false)
   }
@@ -86,8 +85,7 @@ export default function App() {
     const { data } = await q
     if (!data) return
 
-    // Gerencias
-    const gerMap = {}
+    const gerMapP = {}, gerMapH = {}
     const genMap = { FEMENINO: 0, MASCULINO: 0, OTRO: 0 }
     const mesMap = {}
 
@@ -99,11 +97,17 @@ export default function App() {
       const partic = Number(row.participaciones || 0)
       const hrs = Number(row.horas || 0)
 
-      // Gerencia
-      if (!gerMap[ger]) gerMap[ger] = { total: 0, departamentos: {} }
-      gerMap[ger].total += partic
-      if (!gerMap[ger].departamentos[dep]) gerMap[ger].departamentos[dep] = 0
-      gerMap[ger].departamentos[dep] += partic
+      // Participaciones por gerencia
+      if (!gerMapP[ger]) gerMapP[ger] = { total: 0, departamentos: {} }
+      gerMapP[ger].total += partic
+      if (!gerMapP[ger].departamentos[dep]) gerMapP[ger].departamentos[dep] = 0
+      gerMapP[ger].departamentos[dep] += partic
+
+      // Horas por gerencia
+      if (!gerMapH[ger]) gerMapH[ger] = { total: 0, departamentos: {} }
+      gerMapH[ger].total += hrs
+      if (!gerMapH[ger].departamentos[dep]) gerMapH[ger].departamentos[dep] = 0
+      gerMapH[ger].departamentos[dep] += hrs
 
       // Género
       if (gen === 'FEMENINO') genMap.FEMENINO += partic
@@ -118,13 +122,13 @@ export default function App() {
       }
     })
 
-    const gerencias = Object.entries(gerMap)
+    const toArray = (map) => Object.entries(map)
       .map(([nombre, d]) => ({
         nombre: nombre.replace('Gerencia De ', '').replace('Gerencia ', ''),
         nombreCompleto: nombre,
-        total: d.total,
+        total: Math.round(d.total),
         departamentos: Object.entries(d.departamentos)
-          .map(([dep, cnt]) => ({ nombre: dep, total: cnt }))
+          .map(([dep, cnt]) => ({ nombre: dep, total: Math.round(cnt) }))
           .sort((a, b) => b.total - a.total)
       }))
       .sort((a, b) => b.total - a.total)
@@ -143,20 +147,21 @@ export default function App() {
       horas: mesMap[i + 1]?.horas || 0,
     }))
 
-    setGraficas({ gerencias, generos, mensual })
-    setGerenciaSeleccionada(null)
+    setGraficas({ gerenciasPartic: toArray(gerMapP), gerenciasHoras: toArray(gerMapH), generos, mensual })
+    setDrillPartic(null)
+    setDrillHoras(null)
   }
 
-  function GraficaBarras({ datos, colorBarra, campoValor = 'total', labelKey = 'nombre', onBarClick }) {
+  function GraficaBarras({ datos, colorBarra, campoValor = 'total', labelKey = 'nombre', onBarClick, sufijo = '' }) {
     if (!datos || datos.length === 0) return <div style={{ color: '#94A3B8', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Sin datos</div>
     const maxVal = Math.max(...datos.map(d => d[campoValor]), 1)
     return (
-      <div>
+      <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
         {datos.map((d, i) => (
           <div key={i} style={{ marginBottom: '10px', cursor: onBarClick ? 'pointer' : 'default' }} onClick={() => onBarClick && onBarClick(d)}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: COLORS.grafito, marginBottom: '3px' }}>
               <span style={{ maxWidth: '75%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d[labelKey]}</span>
-              <span style={{ fontWeight: '600', color: colorBarra }}>{d[campoValor]}</span>
+              <span style={{ fontWeight: '600', color: colorBarra }}>{d[campoValor].toLocaleString()}{sufijo}</span>
             </div>
             <div style={{ background: '#E2E8F0', borderRadius: '4px', height: '18px', overflow: 'hidden' }}>
               <div style={{
@@ -173,14 +178,48 @@ export default function App() {
     )
   }
 
+  function PanelBarras({ titulo, datos, colorBarra, drill, setDrill, sufijo = '' }) {
+    return (
+      <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+          <div>
+            <div style={{ fontSize: '13px', fontWeight: '600', color: '#1E293B' }}>
+              {drill ? `📂 ${drill.nombre}` : titulo}
+            </div>
+            {drill && <div style={{ fontSize: '10px', color: '#94A3B8', marginTop: '2px' }}>Por departamento</div>}
+          </div>
+          {drill && (
+            <button onClick={() => setDrill(null)}
+              style={{ background: '#F1F5F9', border: 'none', padding: '4px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', color: '#64748B' }}>
+              ← Volver
+            </button>
+          )}
+        </div>
+        {drill ? (
+          <GraficaBarras datos={drill.departamentos} colorBarra={colorBarra} sufijo={sufijo} />
+        ) : (
+          <>
+            <GraficaBarras datos={datos} colorBarra={colorBarra} onBarClick={d => setDrill(d)} sufijo={sufijo} />
+            {datos.length > 0 && (
+              <div style={{ fontSize: '10px', color: '#94A3B8', marginTop: '8px', textAlign: 'center' }}>
+                💡 Clic en una barra para ver departamentos
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    )
+  }
+
   function GraficaDonut({ datos }) {
     if (!datos || datos.length === 0) return null
-    const total = datos.reduce((s, d) => s + d.valor, 0)
+    const datosConValor = datos.filter(d => d.valor > 0)
+    const total = datosConValor.reduce((s, d) => s + d.valor, 0)
     if (total === 0) return <div style={{ color: '#94A3B8', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Sin datos</div>
 
     let acumulado = 0
     const radio = 55, cx = 70, cy = 70
-    const segmentos = datos.filter(d => d.valor > 0).map(d => {
+    const segmentos = datosConValor.map(d => {
       const inicio = acumulado
       acumulado += (d.valor / total) * 360
       return { ...d, inicio, fin: acumulado }
@@ -205,8 +244,8 @@ export default function App() {
             <path key={i} d={arcPath(s.inicio, s.fin)} fill={s.color} stroke="white" strokeWidth="2" />
           ))}
           <circle cx={cx} cy={cy} r="32" fill="white" />
-          <text x={cx} y={cy - 4} textAnchor="middle" fontSize="13" fontWeight="bold" fill={COLORS.grafito}>{total}</text>
-          <text x={cx} y={cy + 11} textAnchor="middle" fontSize="9" fill="#94A3B8">total</text>
+          <text x={cx} y={cy - 4} textAnchor="middle" fontSize="13" fontWeight="bold" fill={COLORS.grafito}>{total.toLocaleString()}</text>
+          <text x={cx} y={cy + 11} textAnchor="middle" fontSize="9" fill="#94A3B8">con género</text>
         </svg>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {datos.map((d, i) => (
@@ -214,7 +253,7 @@ export default function App() {
               <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: d.color, flexShrink: 0 }} />
               <div>
                 <div style={{ fontSize: '12px', color: COLORS.grafito, fontWeight: '500' }}>{d.label}</div>
-                <div style={{ fontSize: '11px', color: '#94A3B8' }}>{d.valor} · {d.pct}%</div>
+                <div style={{ fontSize: '11px', color: '#94A3B8' }}>{d.valor.toLocaleString()} · {d.pct}%</div>
               </div>
             </div>
           ))}
@@ -361,6 +400,7 @@ export default function App() {
                 {cargando && <span style={{ fontSize: '12px', color: '#94A3B8' }}>⏳ Calculando...</span>}
               </div>
 
+              {/* KPIs */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '14px', marginBottom: '24px' }}>
                 {[
                   { label: 'Capacitaciones',  valor: stats.capacitaciones.toLocaleString(), color: COLORS.morado,   icon: '🎓', sub: 'únicas por nombre',  dest: 'capacitaciones' },
@@ -380,47 +420,36 @@ export default function App() {
                 ))}
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px', marginBottom: '16px' }}>
+              {/* Fila 1: dos barras + donut */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 280px', gap: '16px', marginBottom: '16px' }}>
+                <PanelBarras
+                  titulo="🏢 Participaciones por Gerencia"
+                  datos={graficas.gerenciasPartic}
+                  colorBarra={COLORS.azul}
+                  drill={drillPartic}
+                  setDrill={setDrillPartic}
+                />
+                <PanelBarras
+                  titulo="⏱️ Horas por Gerencia"
+                  datos={graficas.gerenciasHoras}
+                  colorBarra={COLORS.morado}
+                  drill={drillHoras}
+                  setDrill={setDrillHoras}
+                  sufijo="h"
+                />
                 <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                    <div>
-                      <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>
-                        {gerenciaSeleccionada ? `📂 ${gerenciaSeleccionada.nombre}` : '🏢 Participaciones por Gerencia'}
-                      </div>
-                      {gerenciaSeleccionada && <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '2px' }}>Desglose por departamento</div>}
-                    </div>
-                    {gerenciaSeleccionada && (
-                      <button onClick={() => setGerenciaSeleccionada(null)}
-                        style={{ background: '#F1F5F9', border: 'none', padding: '5px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', color: '#64748B' }}>
-                        ← Volver
-                      </button>
-                    )}
-                  </div>
-                  {gerenciaSeleccionada ? (
-                    <GraficaBarras datos={gerenciaSeleccionada.departamentos} colorBarra={COLORS.morado} />
-                  ) : (
-                    <>
-                      <GraficaBarras datos={graficas.gerencias} colorBarra={COLORS.azul} onBarClick={d => setGerenciaSeleccionada(d)} />
-                      {graficas.gerencias.length > 0 && (
-                        <div style={{ fontSize: '10px', color: '#94A3B8', marginTop: '10px', textAlign: 'center' }}>
-                          💡 Clic en una barra para ver departamentos
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-
-                <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
-                  <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B', marginBottom: '16px' }}>👥 Distribución por Género</div>
+                  <div style={{ fontSize: '13px', fontWeight: '600', color: '#1E293B', marginBottom: '14px' }}>👥 Género</div>
                   <GraficaDonut datos={graficas.generos} />
                 </div>
               </div>
 
+              {/* Tendencia mensual */}
               <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: '16px' }}>
-                <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B', marginBottom: '16px' }}>📈 Tendencia Mensual — Participaciones y Horas</div>
+                <div style={{ fontSize: '13px', fontWeight: '600', color: '#1E293B', marginBottom: '14px' }}>📈 Tendencia Mensual — Participaciones y Horas</div>
                 <GraficaTendencia datos={graficas.mensual} />
               </div>
 
+              {/* Acciones rápidas */}
               <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                 <div style={{ fontSize: '14px', fontWeight: '500', marginBottom: '16px', color: '#1E293B' }}>Acciones rápidas</div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
