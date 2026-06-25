@@ -88,7 +88,6 @@ export default function ImportarCapacitaciones() {
     const buffer = await archivo.arrayBuffer()
     const wb = XLSX.read(buffer, { cellDates: false, raw: true })
 
-    // Detectar hoja — acepta cualquier nombre
     const nombreHoja = wb.SheetNames.find(n =>
       n.toLowerCase().includes('reporte') ||
       n.toLowerCase().includes('datos') ||
@@ -151,10 +150,14 @@ export default function ImportarCapacitaciones() {
     addLog('🔗 Paso 2: Obteniendo IDs de capacitaciones...')
     const { data: capsDB } = await supabase
       .from('capacitaciones')
-      .select('id, nombre')
+      .select('id, nombre, horas')
 
     const capIdMap = new Map()
-    capsDB?.forEach(c => capIdMap.set(c.nombre.trim(), c.id))
+    const capHorasMap = new Map()
+    capsDB?.forEach(c => {
+      capIdMap.set(c.nombre.trim(), c.id)
+      capHorasMap.set(c.nombre.trim(), c.horas)
+    })
     addLog(`✅ ${capIdMap.size} capacitaciones mapeadas`)
 
     // ── PASO 3: Cargar colaboradores ─────────────────────────────
@@ -167,7 +170,7 @@ export default function ImportarCapacitaciones() {
     colsDB?.forEach(c => colIdMap.set(c.correo.toLowerCase().trim(), c.id))
     addLog(`✅ ${colIdMap.size} colaboradores en el sistema`)
 
-    // ── PASO 4: Crear participantes ──────────────────────────────
+    // ── PASO 4: Crear participantes con horas ────────────────────
     addLog('👤 Paso 4: Procesando participantes...')
 
     const participantesLote = []
@@ -180,6 +183,8 @@ export default function ImportarCapacitaciones() {
       const nombreCap = (fila['Nombre Capacitación'] || '').toString().trim()
       const nombreColab = (fila['Colab '] || fila['Colaborador'] || '').toString().trim()
       const correoRaw = (fila['Correo'] || '').toString().trim().toLowerCase()
+      // Tomar horas directamente de la fila del Excel
+      const horasFila = Number(fila['Horas capacitación']) || 0
 
       const capId = capIdMap.get(nombreCap)
       if (!capId) { sinCap++; continue }
@@ -198,6 +203,7 @@ export default function ImportarCapacitaciones() {
         colaborador_id: colId,
         capacitacion_id: capId,
         correo: correo,
+        horas: horasFila,  // ← horas tomadas directo del Excel por fila
       })
     }
 
@@ -294,7 +300,7 @@ export default function ImportarCapacitaciones() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px' }}>
           {[
             'Nombre Capacitación *', 'Des_Temas', 'Fecha Inicio', 'Fecha fin',
-            'Horas capacitación', 'Estado', 'Empresa', 'Facilitador',
+            'Horas capacitación *', 'Estado', 'Empresa', 'Facilitador',
             'Correo (opcional)', 'Costo', 'Año', 'Género'
           ].map(c => (
             <div key={c} style={{ fontSize: '12px', color: '#64748B', display: 'flex', alignItems: 'center', gap: '5px' }}>
