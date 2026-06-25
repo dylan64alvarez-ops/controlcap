@@ -17,6 +17,7 @@ export default function Participantes({ onCambio }) {
   const [guardando, setGuardando] = useState(false)
   const [exito, setExito] = useState('')
   const [filtroCap, setFiltroCap] = useState('')
+  const [filtroAnio, setFiltroAnio] = useState('')
   const [busqueda, setBusqueda] = useState('')
   const [cargando, setCargando] = useState(true)
 
@@ -25,9 +26,8 @@ export default function Participantes({ onCambio }) {
   async function cargar() {
     setCargando(true)
 
-    // Cargar todo por separado sin JOINs
     const [pRes, cRes, colRes] = await Promise.all([
-      supabase.from('participantes').select('*').order('created_at', { ascending: false }).limit(500),
+      supabase.from('participantes').select('*').order('created_at', { ascending: false }).limit(2000),
       supabase.from('capacitaciones').select('id, nombre, horas, fecha_inicio').order('nombre'),
       supabase.from('colaboradores').select('id, nombre, correo, gerencia, departamento, puesto').order('nombre')
     ])
@@ -36,7 +36,6 @@ export default function Participantes({ onCambio }) {
     const cols = colRes.data || []
     const parts = pRes.data || []
 
-    // Crear mapas para lookup
     const capMap = {}
     caps.forEach(c => { capMap[c.id] = c })
 
@@ -47,11 +46,11 @@ export default function Participantes({ onCambio }) {
       if (c.correo) colByCorreoMap[c.correo.toLowerCase().trim()] = c
     })
 
-    // Enriquecer participantes
     const enriquecidos = parts.map(p => {
       const cap = capMap[p.capacitacion_id] || null
       const col = colByIdMap[p.colaborador_id] || colByCorreoMap[p.correo?.toLowerCase().trim()] || null
-      return { ...p, _cap: cap, _col: col }
+      const anio = cap?.fecha_inicio ? new Date(cap.fecha_inicio).getFullYear() : null
+      return { ...p, _cap: cap, _col: col, _anio: anio }
     })
 
     setParticipantes(enriquecidos)
@@ -73,12 +72,19 @@ export default function Participantes({ onCambio }) {
 
   const filtrados = participantes.filter(p => {
     const matchCap = !filtroCap || p.capacitacion_id === filtroCap
-    if (!busqueda) return matchCap
+    const matchAnio = !filtroAnio || p._anio === parseInt(filtroAnio)
+    if (!busqueda) return matchCap && matchAnio
     const t = busqueda.toLowerCase()
     const nombre = (p._col?.nombre || '').toLowerCase()
     const correo = (p.correo || '').toLowerCase()
     const cap = (p._cap?.nombre || '').toLowerCase()
-    return matchCap && (nombre.includes(t) || correo.includes(t) || cap.includes(t))
+    const gerencia = (p._col?.gerencia || '').toLowerCase()
+    return matchCap && matchAnio && (
+      nombre.includes(t) ||
+      correo.includes(t) ||
+      cap.includes(t) ||
+      gerencia.includes(t)
+    )
   })
 
   async function agregar(colaborador) {
@@ -112,8 +118,10 @@ export default function Participantes({ onCambio }) {
 
   const inp = {
     height: '36px', border: '1px solid #E2E8F0', borderRadius: '8px',
-    padding: '0 10px', fontSize: '13px', width: '100%', outline: 'none', background: 'white'
+    padding: '0 10px', fontSize: '13px', outline: 'none', background: 'white'
   }
+
+  const hayFiltros = filtroCap || filtroAnio || busqueda
 
   return (
     <div>
@@ -125,7 +133,7 @@ export default function Participantes({ onCambio }) {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <div style={{ fontSize: '13px', color: '#64748B' }}>
-          {cargando ? 'Cargando...' : `${filtrados.length} participantes${filtroCap || busqueda ? ' (filtrados)' : ''} · mostrando primeros 200`}
+          {cargando ? 'Cargando...' : `${filtrados.length} participantes${hayFiltros ? ' (filtrados)' : ''}`}
         </div>
         <button onClick={() => setModal(true)}
           style={{ background: '#8131B0', color: 'white', border: 'none', padding: '8px 18px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>
@@ -133,27 +141,38 @@ export default function Participantes({ onCambio }) {
         </button>
       </div>
 
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
+      {/* Filtros */}
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
         <input
           type="text"
-          placeholder="🔍 Buscar por nombre, correo o capacitación..."
+          placeholder="🔍 Nombre, correo, capacitación o gerencia..."
           value={busqueda}
           onChange={e => setBusqueda(e.target.value)}
-          style={{ ...inp, width: '300px' }}
+          style={{ ...inp, width: '280px' }}
         />
-        <select value={filtroCap} onChange={e => setFiltroCap(e.target.value)}
-          style={{ ...inp, width: '320px' }}>
-          <option value="">Todas las capacitaciones</option>
-          {capacitaciones.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+        <select value={filtroAnio} onChange={e => setFiltroAnio(e.target.value)}
+          style={{ ...inp, width: '110px' }}>
+          <option value="">Todos los años</option>
+          {['2026','2025','2024','2023','2022','2021'].map(a => (
+            <option key={a} value={a}>{a}</option>
+          ))}
         </select>
-        {(filtroCap || busqueda) && (
-          <button onClick={() => { setFiltroCap(''); setBusqueda('') }}
-            style={{ padding: '0 14px', border: '1px solid #E2E8F0', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', background: 'white', color: '#64748B' }}>
-            Limpiar
+        <select value={filtroCap} onChange={e => setFiltroCap(e.target.value)}
+          style={{ ...inp, width: '300px' }}>
+          <option value="">Todas las capacitaciones</option>
+          {capacitaciones
+            .filter(c => !filtroAnio || (c.fecha_inicio && new Date(c.fecha_inicio).getFullYear() === parseInt(filtroAnio)))
+            .map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+        </select>
+        {hayFiltros && (
+          <button onClick={() => { setFiltroCap(''); setFiltroAnio(''); setBusqueda('') }}
+            style={{ ...inp, width: 'auto', padding: '0 14px', cursor: 'pointer', color: '#64748B' }}>
+            ✕ Limpiar
           </button>
         )}
       </div>
 
+      {/* Tabla */}
       <div style={{ background: 'white', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', overflow: 'hidden' }}>
         {cargando ? (
           <div style={{ padding: '40px', textAlign: 'center', color: '#94A3B8' }}>Cargando participantes...</div>
@@ -161,14 +180,14 @@ export default function Participantes({ onCambio }) {
           <div style={{ padding: '50px', textAlign: 'center', color: '#94A3B8' }}>
             <div style={{ fontSize: '32px', marginBottom: '10px' }}>👥</div>
             <div style={{ fontWeight: '500', marginBottom: '6px' }}>No hay participantes</div>
-            <div style={{ fontSize: '13px' }}>Ajustá los filtros o usá una capacitación específica</div>
+            <div style={{ fontSize: '13px' }}>Ajustá los filtros o agregá colaboradores a una capacitación</div>
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#F8FAFC' }}>
-                  {['Colaborador', 'Correo', 'Gerencia', 'Puesto', 'Capacitación', 'Horas', 'Género'].map(h => (
+                  {['Colaborador', 'Correo', 'Gerencia', 'Puesto', 'Capacitación', 'Año', 'Horas', 'Género'].map(h => (
                     <th key={h} style={{ padding: '10px 12px', fontSize: '11px', fontWeight: '600', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid #E2E8F0', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -181,8 +200,9 @@ export default function Participantes({ onCambio }) {
                       <td style={{ padding: '10px 12px', fontWeight: '500', fontSize: '13px', whiteSpace: 'nowrap' }}>{p._col?.nombre || '—'}</td>
                       <td style={{ padding: '10px 12px', fontSize: '12px', color: '#0072DA' }}>{correoMostrar}</td>
                       <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{p._col?.gerencia || '—'}</td>
-                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{p._col?.puesto || '—'}</td>
+                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p._col?.puesto || '—'}</td>
                       <td style={{ padding: '10px 12px', fontSize: '12px', color: '#374151', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p._cap?.nombre || '—'}</td>
+                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{p._anio || '—'}</td>
                       <td style={{ padding: '10px 12px', fontSize: '13px', fontWeight: '600', color: '#0F9B72' }}>{p.horas || 0}h</td>
                       <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>
                         {p.genero === 'FEMENINO' ? '♀ F' : p.genero === 'MASCULINO' ? '♂ M' : '—'}
@@ -194,13 +214,14 @@ export default function Participantes({ onCambio }) {
             </table>
             {filtrados.length > 200 && (
               <div style={{ padding: '12px', textAlign: 'center', fontSize: '12px', color: '#94A3B8', borderTop: '1px solid #E2E8F0' }}>
-                Mostrando 200 de {filtrados.length}. Usá los filtros para ver más.
+                Mostrando 200 de {filtrados.length}. Usá los filtros para reducir resultados.
               </div>
             )}
           </div>
         )}
       </div>
 
+      {/* Modal */}
       {modal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: 'white', borderRadius: '16px', width: '520px', maxWidth: '95vw', maxHeight: '90vh', overflow: 'auto' }}>
@@ -212,7 +233,7 @@ export default function Participantes({ onCambio }) {
             <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
                 <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }}>Capacitación *</label>
-                <select value={capSeleccionada} onChange={e => setCapSeleccionada(e.target.value)} style={inp}>
+                <select value={capSeleccionada} onChange={e => setCapSeleccionada(e.target.value)} style={{ ...inp, width: '100%' }}>
                   <option value="">Seleccionar capacitación...</option>
                   {capacitaciones.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                 </select>
@@ -224,7 +245,7 @@ export default function Participantes({ onCambio }) {
                   placeholder="Escribí el nombre o correo..."
                   value={busquedaColab}
                   onChange={e => setBusquedaColab(e.target.value)}
-                  style={inp}
+                  style={{ ...inp, width: '100%' }}
                 />
               </div>
               {resultados.length > 0 && (
