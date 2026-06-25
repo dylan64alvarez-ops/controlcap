@@ -80,42 +80,34 @@ export default function App() {
   }
 
   async function cargarGraficas() {
+    const anioFiltro = anio !== 'todos' ? parseInt(anio) : null
+
+    // Datos de gerencia/departamento/mensual desde la vista
     let q = supabase.from('stats_graficas').select('*')
-    if (anio !== 'todos') q = q.eq('anio', parseInt(anio))
+    if (anioFiltro) q = q.eq('anio', anioFiltro)
     const { data } = await q
     if (!data) return
 
     const gerMapP = {}, gerMapH = {}
-    const genCorreos = { FEMENINO: new Set(), MASCULINO: new Set(), OTRO: new Set() }
     const mesMap = {}
 
     data.forEach(row => {
       const ger = row.gerencia || 'Sin gerencia'
       const dep = row.departamento || 'Sin departamento'
-      const gen = (row.genero || '').toUpperCase()
       const mes = row.mes
       const partic = Number(row.participaciones || 0)
       const hrs = Number(row.horas || 0)
-      const personas = Number(row.personas_unicas || 0)
 
-      // Participaciones por gerencia
       if (!gerMapP[ger]) gerMapP[ger] = { total: 0, departamentos: {} }
       gerMapP[ger].total += partic
       if (!gerMapP[ger].departamentos[dep]) gerMapP[ger].departamentos[dep] = 0
       gerMapP[ger].departamentos[dep] += partic
 
-      // Horas por gerencia
       if (!gerMapH[ger]) gerMapH[ger] = { total: 0, departamentos: {} }
       gerMapH[ger].total += hrs
       if (!gerMapH[ger].departamentos[dep]) gerMapH[ger].departamentos[dep] = 0
       gerMapH[ger].departamentos[dep] += hrs
 
-      // Género — personas únicas acumuladas por género
-      if (gen === 'FEMENINO') genCorreos.FEMENINO.add(personas + '_' + ger + '_' + dep)
-      else if (gen === 'MASCULINO') genCorreos.MASCULINO.add(personas + '_' + ger + '_' + dep)
-      else genCorreos.OTRO.add(personas + '_' + ger + '_' + dep)
-
-      // Mensual
       if (mes) {
         if (!mesMap[mes]) mesMap[mes] = { participaciones: 0, horas: 0 }
         mesMap[mes].participaciones += partic
@@ -123,54 +115,43 @@ export default function App() {
       }
     })
 
-    // Para género, sumar personas_unicas directamente por género
-    const genMap = { FEMENINO: 0, MASCULINO: 0, OTRO: 0 }
-    data.forEach(row => {
-      const gen = (row.genero || '').toUpperCase()
-      const personas = Number(row.personas_unicas || 0)
-      if (gen === 'FEMENINO') genMap.FEMENINO += personas
-      else if (gen === 'MASCULINO') genMap.MASCULINO += personas
-      else genMap.OTRO += personas
-    })
+    // Género: correos únicos por género filtrados por año
+    const genMap = { FEMENINO: 0, MASCULINO: 0 }
 
-    // Deduplicar por correo: usar el máximo por género/gerencia/dep no es perfecto
-    // La vista ya hace COUNT(DISTINCT correo) por grupo, sumamos todos los grupos
-    // Esto puede sobrecontar si alguien aparece en múltiples gerencias/deps
-    // Para corrección exacta necesitamos sumar solo una vez por género global
-    // Usamos la suma de personas_unicas agrupada solo por género y año
-    const { data: genData } = await supabase
-      .from('stats_graficas')
-      .select('genero, personas_unicas')
-      .eq(anio !== 'todos' ? 'anio' : 'anio', anio !== 'todos' ? parseInt(anio) : 0)
-
-    // Query correcta para género único global
-    const genMapFinal = { FEMENINO: 0, MASCULINO: 0, OTRO: 0 }
-
-    // Usar RPC o query directa para contar personas únicas por género
     for (const gen of ['FEMENINO', 'MASCULINO']) {
-      let countQ = supabase
-        .from('participantes')
-        .select('correo', { count: 'exact', head: false })
+      const { data: colsGen } = await supabase
+        .from('colaboradores')
+        .select('correo')
+        .eq('genero', gen)
 
-      const { data: pGenData } = await supabase
-        .from('participantes')
-        .select('correo, colaboradores!inner(genero), capacitaciones!inner(fecha_inicio)')
-        .eq('colaboradores.genero', gen)
+      if (colsGen && colsGen.length > 0) {
+        const correosGen = colsGen.map(c => c.correo.toLowerCase().trim())
 
-      if (pGenData) {
-        const anioFiltro = anio !== 'todos' ? parseInt(anio) : null
-        const filtrado = anioFiltro
-          ? pGenData.filter(p => p.capacitaciones?.fecha_inicio && new Date(p.capacitaciones.fecha_inicio).getFullYear() === anioFiltro)
-          : pGenData
-        const correos = new Set(filtrado.map(p => p.correo))
-        genMapFinal[gen] = correos.size
+        let pQ = supabase
+          .from('participantes')
+          .select('correo, capacitaciones(fecha_inicio)')
+          .in('correo', correosGen)
+
+        const { data: pGen } = await pQ
+
+        if (pGen) {
+          const filtrados = anioFiltro
+            ? pGen.filter(p => {
+                const f = p.capacitaciones?.fecha_inicio
+                return f && new Date(f).getFullYear() === anioFiltro
+              })
+            : pGen
+
+          const unicos = new Set(filtrados.map(p => p.correo))
+          genMap[gen] = unicos.size
+        }
       }
     }
 
-    const totalGen = genMapFinal.FEMENINO + genMapFinal.MASCULINO
+    const totalGen = genMap.FEMENINO + genMap.MASCULINO
     const generos = [
-      { label: 'Femenino',  valor: genMapFinal.FEMENINO,  pct: totalGen ? Math.round(genMapFinal.FEMENINO / totalGen * 100) : 0,  color: COLORS.morado },
-      { label: 'Masculino', valor: genMapFinal.MASCULINO, pct: totalGen ? Math.round(genMapFinal.MASCULINO / totalGen * 100) : 0, color: COLORS.azul },
+      { label: 'Femenino',  valor: genMap.FEMENINO,  pct: totalGen ? Math.round(genMap.FEMENINO / totalGen * 100) : 0,  color: COLORS.morado },
+      { label: 'Masculino', valor: genMap.MASCULINO, pct: totalGen ? Math.round(genMap.MASCULINO / totalGen * 100) : 0, color: COLORS.azul },
     ]
 
     const toArray = (map) => Object.entries(map)
