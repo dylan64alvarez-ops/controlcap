@@ -4,7 +4,6 @@ import Importar from './pages/Importar.jsx'
 import Colaboradores from './pages/Colaboradores.jsx'
 import Capacitaciones from './pages/Capacitaciones.jsx'
 import Presupuesto from './pages/Presupuesto.jsx'
-import Traslados from './pages/Traslados.jsx'
 import Participantes from './pages/Participantes.jsx'
 import Reportes from './pages/Reportes.jsx'
 import ImportarCapacitaciones from './pages/ImportarCapacitaciones.jsx'
@@ -113,7 +112,6 @@ export default function App() {
       }
     })
 
-    // Género
     const genMap = { FEMENINO: 0, MASCULINO: 0 }
     const { data: genData } = await supabase
       .rpc('get_genero_stats', anioFiltro ? { anio_param: anioFiltro } : { anio_param: null })
@@ -318,7 +316,6 @@ export default function App() {
     { id: 'capacitaciones',          label: '🎓 Capacitaciones' },
     { id: 'participantes',           label: '👥 Participantes' },
     { id: 'presupuesto',             label: '💰 Presupuesto' },
-    { id: 'traslados',               label: '↔️ Traslados' },
     { id: 'colaboradores',           label: '📋 Colaboradores' },
     { id: 'reportes',                label: '📄 Reportes' },
     { id: 'importar',                label: '📥 Importar colaboradores' },
@@ -332,7 +329,7 @@ export default function App() {
 
   const paginasActivas = [
     'dashboard', 'importar', 'colaboradores', 'capacitaciones',
-    'presupuesto', 'traslados', 'participantes', 'reportes',
+    'presupuesto', 'participantes', 'reportes',
     'importar-capacitaciones'
   ]
 
@@ -472,7 +469,6 @@ export default function App() {
           {pagina === 'colaboradores'           && <Colaboradores />}
           {pagina === 'capacitaciones'          && <Capacitaciones onCambio={cargarStats} />}
           {pagina === 'presupuesto'             && <Presupuesto onCambio={cargarStats} />}
-          {pagina === 'traslados'               && <Traslados onCambio={cargarStats} />}
           {pagina === 'participantes'           && <Participantes onCambio={cargarStats} />}
           {pagina === 'reportes'                && <Reportes />}
           {pagina === 'importar'                && <Importar onImportado={cargarStats} />}
@@ -481,7 +477,7 @@ export default function App() {
           {!paginasActivas.includes(pagina) && (
             <div style={{ background: 'white', borderRadius: '12px', padding: '40px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
               <div style={{ fontSize: '40px', marginBottom: '12px' }}>🚧</div>
-              <div style={{ fontSize: '16px', fontWeight: '500', marginBottom: '8px' }}>Módulo: {pagina}</div>
+              <div style={{ fontSize: '16px', fontWeight: '500', marginBottom: '8px' }}>Módulo en construcción</div>
               <div style={{ fontSize: '13px', color: '#64748B' }}>Este módulo se construye en el siguiente paso</div>
             </div>
           )}
