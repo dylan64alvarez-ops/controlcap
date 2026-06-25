@@ -86,7 +86,7 @@ export default function App() {
     if (!data) return
 
     const gerMapP = {}, gerMapH = {}
-    const genMap = { FEMENINO: 0, MASCULINO: 0, OTRO: 0 }
+    const genCorreos = { FEMENINO: new Set(), MASCULINO: new Set(), OTRO: new Set() }
     const mesMap = {}
 
     data.forEach(row => {
@@ -96,6 +96,7 @@ export default function App() {
       const mes = row.mes
       const partic = Number(row.participaciones || 0)
       const hrs = Number(row.horas || 0)
+      const personas = Number(row.personas_unicas || 0)
 
       // Participaciones por gerencia
       if (!gerMapP[ger]) gerMapP[ger] = { total: 0, departamentos: {} }
@@ -109,10 +110,10 @@ export default function App() {
       if (!gerMapH[ger].departamentos[dep]) gerMapH[ger].departamentos[dep] = 0
       gerMapH[ger].departamentos[dep] += hrs
 
-      // Género
-      if (gen === 'FEMENINO') genMap.FEMENINO += partic
-      else if (gen === 'MASCULINO') genMap.MASCULINO += partic
-      else genMap.OTRO += partic
+      // Género — personas únicas acumuladas por género
+      if (gen === 'FEMENINO') genCorreos.FEMENINO.add(personas + '_' + ger + '_' + dep)
+      else if (gen === 'MASCULINO') genCorreos.MASCULINO.add(personas + '_' + ger + '_' + dep)
+      else genCorreos.OTRO.add(personas + '_' + ger + '_' + dep)
 
       // Mensual
       if (mes) {
@@ -121,6 +122,56 @@ export default function App() {
         mesMap[mes].horas += hrs
       }
     })
+
+    // Para género, sumar personas_unicas directamente por género
+    const genMap = { FEMENINO: 0, MASCULINO: 0, OTRO: 0 }
+    data.forEach(row => {
+      const gen = (row.genero || '').toUpperCase()
+      const personas = Number(row.personas_unicas || 0)
+      if (gen === 'FEMENINO') genMap.FEMENINO += personas
+      else if (gen === 'MASCULINO') genMap.MASCULINO += personas
+      else genMap.OTRO += personas
+    })
+
+    // Deduplicar por correo: usar el máximo por género/gerencia/dep no es perfecto
+    // La vista ya hace COUNT(DISTINCT correo) por grupo, sumamos todos los grupos
+    // Esto puede sobrecontar si alguien aparece en múltiples gerencias/deps
+    // Para corrección exacta necesitamos sumar solo una vez por género global
+    // Usamos la suma de personas_unicas agrupada solo por género y año
+    const { data: genData } = await supabase
+      .from('stats_graficas')
+      .select('genero, personas_unicas')
+      .eq(anio !== 'todos' ? 'anio' : 'anio', anio !== 'todos' ? parseInt(anio) : 0)
+
+    // Query correcta para género único global
+    const genMapFinal = { FEMENINO: 0, MASCULINO: 0, OTRO: 0 }
+
+    // Usar RPC o query directa para contar personas únicas por género
+    for (const gen of ['FEMENINO', 'MASCULINO']) {
+      let countQ = supabase
+        .from('participantes')
+        .select('correo', { count: 'exact', head: false })
+
+      const { data: pGenData } = await supabase
+        .from('participantes')
+        .select('correo, colaboradores!inner(genero), capacitaciones!inner(fecha_inicio)')
+        .eq('colaboradores.genero', gen)
+
+      if (pGenData) {
+        const anioFiltro = anio !== 'todos' ? parseInt(anio) : null
+        const filtrado = anioFiltro
+          ? pGenData.filter(p => p.capacitaciones?.fecha_inicio && new Date(p.capacitaciones.fecha_inicio).getFullYear() === anioFiltro)
+          : pGenData
+        const correos = new Set(filtrado.map(p => p.correo))
+        genMapFinal[gen] = correos.size
+      }
+    }
+
+    const totalGen = genMapFinal.FEMENINO + genMapFinal.MASCULINO
+    const generos = [
+      { label: 'Femenino',  valor: genMapFinal.FEMENINO,  pct: totalGen ? Math.round(genMapFinal.FEMENINO / totalGen * 100) : 0,  color: COLORS.morado },
+      { label: 'Masculino', valor: genMapFinal.MASCULINO, pct: totalGen ? Math.round(genMapFinal.MASCULINO / totalGen * 100) : 0, color: COLORS.azul },
+    ]
 
     const toArray = (map) => Object.entries(map)
       .map(([nombre, d]) => ({
@@ -132,13 +183,6 @@ export default function App() {
           .sort((a, b) => b.total - a.total)
       }))
       .sort((a, b) => b.total - a.total)
-
-    const totalGen = genMap.FEMENINO + genMap.MASCULINO + genMap.OTRO
-    const generos = [
-      { label: 'Femenino',  valor: genMap.FEMENINO,  pct: totalGen ? Math.round(genMap.FEMENINO / totalGen * 100) : 0,  color: COLORS.morado },
-      { label: 'Masculino', valor: genMap.MASCULINO, pct: totalGen ? Math.round(genMap.MASCULINO / totalGen * 100) : 0, color: COLORS.azul },
-      { label: 'Otro',      valor: genMap.OTRO,      pct: totalGen ? Math.round(genMap.OTRO / totalGen * 100) : 0,      color: COLORS.grafito },
-    ]
 
     const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Set','Oct','Nov','Dic']
     const mensual = meses.map((label, i) => ({
@@ -245,7 +289,7 @@ export default function App() {
           ))}
           <circle cx={cx} cy={cy} r="32" fill="white" />
           <text x={cx} y={cy - 4} textAnchor="middle" fontSize="13" fontWeight="bold" fill={COLORS.grafito}>{total.toLocaleString()}</text>
-          <text x={cx} y={cy + 11} textAnchor="middle" fontSize="9" fill="#94A3B8">con género</text>
+          <text x={cx} y={cy + 11} textAnchor="middle" fontSize="9" fill="#94A3B8">personas</text>
         </svg>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {datos.map((d, i) => (
@@ -400,7 +444,6 @@ export default function App() {
                 {cargando && <span style={{ fontSize: '12px', color: '#94A3B8' }}>⏳ Calculando...</span>}
               </div>
 
-              {/* KPIs */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '14px', marginBottom: '24px' }}>
                 {[
                   { label: 'Capacitaciones',  valor: stats.capacitaciones.toLocaleString(), color: COLORS.morado,   icon: '🎓', sub: 'únicas por nombre',  dest: 'capacitaciones' },
@@ -420,7 +463,6 @@ export default function App() {
                 ))}
               </div>
 
-              {/* Fila 1: dos barras + donut */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 280px', gap: '16px', marginBottom: '16px' }}>
                 <PanelBarras
                   titulo="🏢 Participaciones por Gerencia"
@@ -438,18 +480,16 @@ export default function App() {
                   sufijo="h"
                 />
                 <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
-                  <div style={{ fontSize: '13px', fontWeight: '600', color: '#1E293B', marginBottom: '14px' }}>👥 Género</div>
+                  <div style={{ fontSize: '13px', fontWeight: '600', color: '#1E293B', marginBottom: '14px' }}>👥 Distribución por Género</div>
                   <GraficaDonut datos={graficas.generos} />
                 </div>
               </div>
 
-              {/* Tendencia mensual */}
               <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: '16px' }}>
                 <div style={{ fontSize: '13px', fontWeight: '600', color: '#1E293B', marginBottom: '14px' }}>📈 Tendencia Mensual — Participaciones y Horas</div>
                 <GraficaTendencia datos={graficas.mensual} />
               </div>
 
-              {/* Acciones rápidas */}
               <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                 <div style={{ fontSize: '14px', fontWeight: '500', marginBottom: '16px', color: '#1E293B' }}>Acciones rápidas</div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
