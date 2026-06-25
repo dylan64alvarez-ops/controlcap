@@ -25,6 +25,17 @@ export default function Presupuesto({ onCambio }) {
   async function cargar() {
     setCargando(true)
 
+    // Cargar colaboradores para lookup por correo e id
+    const { data: colsData } = await supabase
+      .from('colaboradores')
+      .select('id, correo, gerencia, departamento')
+
+    const colById = {}, colByCorreo = {}
+    colsData?.forEach(c => {
+      colById[c.id] = c
+      if (c.correo) colByCorreo[c.correo.toLowerCase().trim()] = c
+    })
+
     // Obtener IDs de capacitaciones del año
     let capIds = null
     if (filtroAnio) {
@@ -36,57 +47,46 @@ export default function Presupuesto({ onCambio }) {
 
       if (!capsAnio || capsAnio.length === 0) {
         setDatos([])
+        setGerencias([])
         setCargando(false)
         return
       }
       capIds = capsAnio.map(c => c.id)
     }
 
-    // Obtener participantes con costo y colaborador
+    // Obtener participantes con costo — sin JOIN a colaboradores
     let q = supabase
       .from('participantes')
-      .select('costo, correo, colaborador_id, colaboradores(gerencia, departamento)')
+      .select('costo, correo, colaborador_id')
       .gt('costo', 0)
 
     if (capIds) q = q.in('capacitacion_id', capIds)
 
     const { data: pData } = await q
 
-    // Obtener colaboradores por correo para los que no tienen colaborador_id
-    const { data: colsData } = await supabase
-      .from('colaboradores')
-      .select('correo, gerencia, departamento')
-
-    const colByCorreo = {}
-    colsData?.forEach(c => {
-      if (c.correo) colByCorreo[c.correo.toLowerCase().trim()] = c
-    })
-
-    // Enriquecer con gerencia
+    // Enriquecer con gerencia/departamento via lookup local
     const enriquecidos = (pData || []).map(p => {
-      const ger = p.colaboradores?.gerencia ||
-        colByCorreo[p.correo?.toLowerCase().trim()]?.gerencia ||
-        'Sin gerencia'
-      const dep = p.colaboradores?.departamento ||
-        colByCorreo[p.correo?.toLowerCase().trim()]?.departamento ||
-        'Sin departamento'
-      return { ...p, _gerencia: ger, _departamento: dep }
+      const col = colById[p.colaborador_id] ||
+        colByCorreo[p.correo?.toLowerCase().trim()] ||
+        null
+      return {
+        ...p,
+        _gerencia: col?.gerencia || 'Sin gerencia',
+        _departamento: col?.departamento || 'Sin departamento'
+      }
     })
 
     setDatos(enriquecidos)
 
-    // Extraer gerencias únicas
     const gersUnicas = [...new Set(enriquecidos.map(p => p._gerencia))].sort()
     setGerencias(gersUnicas)
     setCargando(false)
   }
 
-  // Filtrar por gerencia seleccionada
   const datosFiltrados = filtroGerencia
     ? datos.filter(p => p._gerencia === filtroGerencia)
     : datos
 
-  // Total ejecutado
   const totalEjecutado = datosFiltrados.reduce((s, p) => s + Number(p.costo || 0), 0)
 
   // Agrupar por gerencia
@@ -102,7 +102,7 @@ export default function Presupuesto({ onCambio }) {
 
   const gerenciasArray = Object.entries(porGerencia)
     .map(([nombre, d]) => ({
-      nombre: nombre.replace('Gerencia De ', '').replace('Gerencia ', ''),
+      nombre: nombre.replace('Gerencia de ', '').replace('Gerencia ', ''),
       nombreCompleto: nombre,
       total: d.total,
       departamentos: Object.entries(d.departamentos)
@@ -111,26 +111,25 @@ export default function Presupuesto({ onCambio }) {
     }))
     .sort((a, b) => b.total - a.total)
 
-  // Drill: departamentos de la gerencia seleccionada
-  const drillDatos = drillGerencia
-    ? (porGerencia[drillGerencia.nombreCompleto]?.departamentos || {})
-    : null
-
-  const drillArray = drillDatos
-    ? Object.entries(drillDatos)
-        .map(([dep, total]) => ({ nombre: dep, total }))
-        .sort((a, b) => b.total - a.total)
+  const drillArray = drillGerencia
+    ? (porGerencia[drillGerencia.nombreCompleto]?.departamentos
+        ? Object.entries(porGerencia[drillGerencia.nombreCompleto].departamentos)
+            .map(([dep, total]) => ({ nombre: dep, total }))
+            .sort((a, b) => b.total - a.total)
+        : [])
     : []
 
-  function GraficaBarras({ datos, color, sufijo = '' }) {
-    if (!datos || datos.length === 0) return <div style={{ color: '#94A3B8', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Sin datos</div>
+  function GraficaBarras({ datos, color }) {
+    if (!datos || datos.length === 0) return (
+      <div style={{ color: '#94A3B8', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Sin datos</div>
+    )
     const max = Math.max(...datos.map(d => d.total), 1)
     return (
       <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
         {datos.map((d, i) => (
           <div key={i} style={{ marginBottom: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: COLORS.grafito, marginBottom: '3px' }}>
-              <span style={{ maxWidth: '65%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.nombre}</span>
+              <span style={{ maxWidth: '60%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.nombre}</span>
               <span style={{ fontWeight: '600', color: color }}>₡{Math.round(d.total).toLocaleString()}</span>
             </div>
             <div style={{ background: '#E2E8F0', borderRadius: '4px', height: '18px', overflow: 'hidden' }}>
@@ -154,11 +153,11 @@ export default function Presupuesto({ onCambio }) {
           {ANIOS.map(a => <option key={a} value={a}>{a}</option>)}
         </select>
         <select value={filtroGerencia} onChange={e => { setFiltroGerencia(e.target.value); setDrillGerencia(null) }}
-          style={{ ...inp, width: '280px' }}>
+          style={{ ...inp, width: '300px' }}>
           <option value="">Todas las gerencias</option>
           {gerencias.map(g => <option key={g} value={g}>{g}</option>)}
         </select>
-        {(filtroGerencia) && (
+        {filtroGerencia && (
           <button onClick={() => { setFiltroGerencia(''); setDrillGerencia(null) }}
             style={{ ...inp, width: 'auto', padding: '0 14px', cursor: 'pointer', color: '#64748B' }}>
             ✕ Limpiar
@@ -166,13 +165,13 @@ export default function Presupuesto({ onCambio }) {
         )}
       </div>
 
-      {/* KPI principal */}
+      {/* KPIs */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '24px' }}>
         <div style={{ background: 'white', borderRadius: '12px', padding: '20px', borderLeft: `4px solid ${COLORS.rojo}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
           <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '6px' }}>
             💰 Total ejecutado {filtroAnio || 'histórico'}{filtroGerencia ? ` · ${filtroGerencia.replace('Gerencia ', '')}` : ''}
           </div>
-          <div style={{ fontSize: '28px', fontWeight: '700', color: COLORS.rojo }}>
+          <div style={{ fontSize: '26px', fontWeight: '700', color: COLORS.rojo }}>
             {cargando ? '...' : `₡${Math.round(totalEjecutado).toLocaleString()}`}
           </div>
           <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '4px' }}>
@@ -182,7 +181,7 @@ export default function Presupuesto({ onCambio }) {
 
         <div style={{ background: 'white', borderRadius: '12px', padding: '20px', borderLeft: `4px solid ${COLORS.azul}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
           <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '6px' }}>🏢 Gerencias con gasto</div>
-          <div style={{ fontSize: '28px', fontWeight: '700', color: COLORS.azul }}>
+          <div style={{ fontSize: '26px', fontWeight: '700', color: COLORS.azul }}>
             {cargando ? '...' : gerenciasArray.filter(g => !filtroGerencia || g.nombreCompleto === filtroGerencia).length}
           </div>
           <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '4px' }}>unidades organizacionales</div>
@@ -190,17 +189,17 @@ export default function Presupuesto({ onCambio }) {
 
         <div style={{ background: 'white', borderRadius: '12px', padding: '20px', borderLeft: `4px solid ${COLORS.morado}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
           <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '6px' }}>📊 Costo promedio por participante</div>
-          <div style={{ fontSize: '28px', fontWeight: '700', color: COLORS.morado }}>
-            {cargando ? '...' : datosFiltrados.length > 0 ? `₡${Math.round(totalEjecutado / datosFiltrados.length).toLocaleString()}` : '₡0'}
+          <div style={{ fontSize: '26px', fontWeight: '700', color: COLORS.morado }}>
+            {cargando ? '...' : datosFiltrados.length > 0
+              ? `₡${Math.round(totalEjecutado / datosFiltrados.length).toLocaleString()}`
+              : '₡0'}
           </div>
           <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '4px' }}>promedio por participación</div>
         </div>
       </div>
 
-      {/* Gráfica de barras por gerencia */}
+      {/* Gráfica */}
       <div style={{ display: 'grid', gridTemplateColumns: drillGerencia ? '1fr 1fr' : '1fr', gap: '16px', marginBottom: '24px' }}>
-
-        {/* Panel gerencias */}
         <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
           <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B', marginBottom: '16px' }}>
             🏢 Gasto por Gerencia
@@ -221,7 +220,8 @@ export default function Presupuesto({ onCambio }) {
                       <button key={g.nombre}
                         onClick={() => setDrillGerencia(drillGerencia?.nombre === g.nombre ? null : g)}
                         style={{
-                          padding: '4px 10px', borderRadius: '20px', border: 'none', cursor: 'pointer', fontSize: '11px',
+                          padding: '4px 10px', borderRadius: '20px', border: 'none',
+                          cursor: 'pointer', fontSize: '11px',
                           background: drillGerencia?.nombre === g.nombre ? COLORS.morado : '#EEF0FF',
                           color: drillGerencia?.nombre === g.nombre ? 'white' : COLORS.morado,
                           fontWeight: '500'
@@ -236,13 +236,12 @@ export default function Presupuesto({ onCambio }) {
           )}
         </div>
 
-        {/* Panel departamentos (drill) */}
         {drillGerencia && (
           <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <div>
                 <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>📂 {drillGerencia.nombre}</div>
-                <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '2px' }}>Desglose por departamento</div>
+                <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '2px' }}>Por departamento</div>
               </div>
               <button onClick={() => setDrillGerencia(null)}
                 style={{ background: '#F1F5F9', border: 'none', padding: '5px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '11px', color: '#64748B' }}>
@@ -254,7 +253,7 @@ export default function Presupuesto({ onCambio }) {
         )}
       </div>
 
-      {/* Tabla detallada por gerencia */}
+      {/* Tabla resumen */}
       <div style={{ background: 'white', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', overflow: 'hidden' }}>
         <div style={{ padding: '16px 20px', borderBottom: `1px solid ${COLORS.borde}`, fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>
           📋 Resumen por Gerencia
@@ -278,7 +277,7 @@ export default function Presupuesto({ onCambio }) {
                   const pct = totalGlobal > 0 ? ((g.total / totalGlobal) * 100).toFixed(1) : '0'
                   const count = datos.filter(p => p._gerencia === g.nombreCompleto).length
                   return (
-                    <tr key={g.nombre} style={{ background: i % 2 === 0 ? 'white' : '#FAFAFA' }}
+                    <tr key={g.nombre}
                       onClick={() => setDrillGerencia(drillGerencia?.nombre === g.nombre ? null : g)}
                       style={{ background: i % 2 === 0 ? 'white' : '#FAFAFA', cursor: 'pointer' }}>
                       <td style={{ padding: '12px 16px', fontWeight: '500', fontSize: '13px' }}>{g.nombreCompleto}</td>
