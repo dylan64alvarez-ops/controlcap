@@ -37,6 +37,7 @@ export default function App() {
   async function cargarStats() {
     setCargando(true)
 
+    // KPIs
     let query = supabase.from('stats_por_anio').select('*')
     if (anio !== 'todos') query = query.eq('anio', parseInt(anio))
     const { data: statsData } = await query
@@ -72,81 +73,57 @@ export default function App() {
 
     const { data: preData } = await supabase.from('presupuesto').select('importe').eq('cd', 'CR')
     const totalPre = preData?.reduce((s, r) => s + Number(r.importe), 0) || 0
-
     setStats({ capacitaciones, colaboradores, participantes, horas, presupuesto: totalPre })
+
+    // Gráficas desde vista
     await cargarGraficas()
     setCargando(false)
   }
 
   async function cargarGraficas() {
-    // Obtener colaboradores con gerencia/departamento/género
-    const { data: colsData } = await supabase
-      .from('colaboradores')
-      .select('id, gerencia, departamento, genero')
+    let q = supabase.from('stats_graficas').select('*')
+    if (anio !== 'todos') q = q.eq('anio', parseInt(anio))
+    const { data } = await q
+    if (!data) return
 
-    if (!colsData) return
-
-    const colMap = {}
-    colsData.forEach(c => { colMap[c.id] = c })
-
-    // Obtener participantes con capacitacion info
-    let pQuery = supabase
-      .from('participantes')
-      .select('colaborador_id, horas, capacitacion_id, capacitaciones(fecha_inicio)')
-      .not('colaborador_id', 'is', null)
-
-    const { data: pData } = await pQuery
-    if (!pData) return
-
-    const anioFiltro = anio !== 'todos' ? parseInt(anio) : null
-
-    const filtrado = anioFiltro
-      ? pData.filter(p => {
-          const fecha = p.capacitaciones?.fecha_inicio
-          return fecha && new Date(fecha).getFullYear() === anioFiltro
-        })
-      : pData
-
+    // Gerencias
     const gerMap = {}
     const genMap = { FEMENINO: 0, MASCULINO: 0, OTRO: 0 }
     const mesMap = {}
 
-    filtrado.forEach(p => {
-      const col = colMap[p.colaborador_id]
-      if (!col) return
-
-      const ger = col.gerencia || 'Sin gerencia'
-      const dep = col.departamento || 'Sin departamento'
-      const gen = (col.genero || '').toUpperCase()
-      const fecha = p.capacitaciones?.fecha_inicio
-      const mes = fecha ? new Date(fecha).getMonth() + 1 : null
-      const hrs = Number(p.horas || 0)
+    data.forEach(row => {
+      const ger = row.gerencia || 'Sin gerencia'
+      const dep = row.departamento || 'Sin departamento'
+      const gen = (row.genero || '').toUpperCase()
+      const mes = row.mes
+      const partic = Number(row.participaciones || 0)
+      const hrs = Number(row.horas || 0)
 
       // Gerencia
       if (!gerMap[ger]) gerMap[ger] = { total: 0, departamentos: {} }
-      gerMap[ger].total++
+      gerMap[ger].total += partic
       if (!gerMap[ger].departamentos[dep]) gerMap[ger].departamentos[dep] = 0
-      gerMap[ger].departamentos[dep]++
+      gerMap[ger].departamentos[dep] += partic
 
       // Género
-      if (gen === 'FEMENINO') genMap.FEMENINO++
-      else if (gen === 'MASCULINO') genMap.MASCULINO++
-      else genMap.OTRO++
+      if (gen === 'FEMENINO') genMap.FEMENINO += partic
+      else if (gen === 'MASCULINO') genMap.MASCULINO += partic
+      else genMap.OTRO += partic
 
       // Mensual
       if (mes) {
         if (!mesMap[mes]) mesMap[mes] = { participaciones: 0, horas: 0 }
-        mesMap[mes].participaciones++
+        mesMap[mes].participaciones += partic
         mesMap[mes].horas += hrs
       }
     })
 
     const gerencias = Object.entries(gerMap)
-      .map(([nombre, data]) => ({
+      .map(([nombre, d]) => ({
         nombre: nombre.replace('Gerencia De ', '').replace('Gerencia ', ''),
         nombreCompleto: nombre,
-        total: data.total,
-        departamentos: Object.entries(data.departamentos)
+        total: d.total,
+        departamentos: Object.entries(d.departamentos)
           .map(([dep, cnt]) => ({ nombre: dep, total: cnt }))
           .sort((a, b) => b.total - a.total)
       }))
@@ -247,7 +224,9 @@ export default function App() {
   }
 
   function GraficaTendencia({ datos }) {
-    if (!datos || datos.every(d => d.participaciones === 0)) return <div style={{ color: '#94A3B8', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Sin datos para el período seleccionado</div>
+    if (!datos || datos.every(d => d.participaciones === 0)) return (
+      <div style={{ color: '#94A3B8', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Sin datos para el período seleccionado</div>
+    )
     const maxP = Math.max(...datos.map(d => d.participaciones), 1)
     const maxH = Math.max(...datos.map(d => d.horas), 1)
     const W = 520, H = 130, padL = 10, padR = 10, padT = 10, padB = 25
@@ -284,7 +263,7 @@ export default function App() {
             <span style={{ fontSize: '11px', color: '#64748B' }}>Participaciones</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div style={{ width: '24px', height: '2px', background: COLORS.morado, borderRadius: '2px', borderTop: `2px dashed ${COLORS.morado}` }} />
+            <div style={{ width: '24px', height: '2px', background: COLORS.morado, borderRadius: '2px' }} />
             <span style={{ fontSize: '11px', color: '#64748B' }}>Horas</span>
           </div>
         </div>
@@ -384,11 +363,11 @@ export default function App() {
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '14px', marginBottom: '24px' }}>
                 {[
-                  { label: 'Capacitaciones',  valor: stats.capacitaciones.toLocaleString(), color: COLORS.morado, icon: '🎓', sub: 'únicas por nombre',  dest: 'capacitaciones' },
-                  { label: 'Colaboradores',    valor: stats.colaboradores.toLocaleString(),  color: COLORS.amarillo, icon: '📋', sub: 'únicos por correo', dest: 'colaboradores' },
-                  { label: 'Participaciones',  valor: stats.participantes.toLocaleString(),  color: COLORS.azul,   icon: '👥', sub: 'registros totales',  dest: 'participantes' },
-                  { label: 'Horas impartidas', valor: stats.horas.toLocaleString(),          color: COLORS.morado, icon: '⏱️', sub: 'total acumulado',    dest: 'capacitaciones' },
-                  { label: 'Presupuesto (CR)', valor: '₡' + stats.presupuesto.toLocaleString(), color: COLORS.rojo, icon: '💰', sub: 'ejecutado',         dest: 'presupuesto' },
+                  { label: 'Capacitaciones',  valor: stats.capacitaciones.toLocaleString(), color: COLORS.morado,   icon: '🎓', sub: 'únicas por nombre',  dest: 'capacitaciones' },
+                  { label: 'Colaboradores',    valor: stats.colaboradores.toLocaleString(),  color: COLORS.amarillo, icon: '📋', sub: 'únicos por correo',  dest: 'colaboradores' },
+                  { label: 'Participaciones',  valor: stats.participantes.toLocaleString(),  color: COLORS.azul,     icon: '👥', sub: 'registros totales',  dest: 'participantes' },
+                  { label: 'Horas impartidas', valor: stats.horas.toLocaleString(),          color: COLORS.morado,   icon: '⏱️', sub: 'total acumulado',    dest: 'capacitaciones' },
+                  { label: 'Presupuesto (CR)', valor: '₡' + stats.presupuesto.toLocaleString(), color: COLORS.rojo,  icon: '💰', sub: 'ejecutado',          dest: 'presupuesto' },
                 ].map(kpi => (
                   <div key={kpi.label} onClick={() => irA(kpi.dest)}
                     style={{ background: 'white', borderRadius: '12px', padding: '18px', borderLeft: `4px solid ${kpi.color}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', cursor: 'pointer' }}>
@@ -408,7 +387,7 @@ export default function App() {
                       <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>
                         {gerenciaSeleccionada ? `📂 ${gerenciaSeleccionada.nombre}` : '🏢 Participaciones por Gerencia'}
                       </div>
-                      {gerenciaSeleccionada && <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '2px' }}>Desglose por departamento · clic para volver</div>}
+                      {gerenciaSeleccionada && <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '2px' }}>Desglose por departamento</div>}
                     </div>
                     {gerenciaSeleccionada && (
                       <button onClick={() => setGerenciaSeleccionada(null)}
@@ -421,11 +400,7 @@ export default function App() {
                     <GraficaBarras datos={gerenciaSeleccionada.departamentos} colorBarra={COLORS.morado} />
                   ) : (
                     <>
-                      <GraficaBarras
-                        datos={graficas.gerencias}
-                        colorBarra={COLORS.azul}
-                        onBarClick={(d) => setGerenciaSeleccionada(d)}
-                      />
+                      <GraficaBarras datos={graficas.gerencias} colorBarra={COLORS.azul} onBarClick={d => setGerenciaSeleccionada(d)} />
                       {graficas.gerencias.length > 0 && (
                         <div style={{ fontSize: '10px', color: '#94A3B8', marginTop: '10px', textAlign: 'center' }}>
                           💡 Clic en una barra para ver departamentos
