@@ -88,8 +88,11 @@ export default function ImportarCapacitaciones() {
     const buffer = await archivo.arrayBuffer()
     const wb = XLSX.read(buffer, { cellDates: false, raw: true })
 
+    // Detectar hoja — acepta cualquier nombre
     const nombreHoja = wb.SheetNames.find(n =>
-      n.toLowerCase().includes('reporte') || n.toLowerCase().includes('datos')
+      n.toLowerCase().includes('reporte') ||
+      n.toLowerCase().includes('datos') ||
+      n.toLowerCase().includes('hoja')
     ) || wb.SheetNames[0]
 
     addLog(`📋 Hoja detectada: "${nombreHoja}"`)
@@ -154,7 +157,7 @@ export default function ImportarCapacitaciones() {
     capsDB?.forEach(c => capIdMap.set(c.nombre.trim(), c.id))
     addLog(`✅ ${capIdMap.size} capacitaciones mapeadas`)
 
-    // ── PASO 3: Cargar colaboradores (opcional, solo para vincular) ──
+    // ── PASO 3: Cargar colaboradores ─────────────────────────────
     addLog('👥 Paso 3: Obteniendo colaboradores...')
     const { data: colsDB } = await supabase
       .from('colaboradores')
@@ -181,15 +184,12 @@ export default function ImportarCapacitaciones() {
       const capId = capIdMap.get(nombreCap)
       if (!capId) { sinCap++; continue }
 
-      // Resolver correo: si está vacío o no tiene @, generar placeholder
       const correo = resolverCorreo(correoRaw, nombreColab, nombreCap)
       if (!correoRaw || !correoRaw.includes('@')) sinCorreo++
 
-      // Buscar colaborador_id si existe, pero NO bloquear si no existe
       const colId = colIdMap.get(correoRaw) || null
       if (correoRaw && correoRaw.includes('@') && !colId) sinColab++
 
-      // Clave de deduplicación: correo + capacitación
       const clave = `${correo}||${capId}`
       if (vistos.has(clave)) continue
       vistos.add(clave)
@@ -206,7 +206,6 @@ export default function ImportarCapacitaciones() {
     if (sinColab > 0) addLog(`⚠️ ${sinColab} participantes ya no están en la organización (se importan igual)`, 'warn')
     if (sinCap > 0) addLog(`⚠️ ${sinCap} filas con capacitación no encontrada (se omiten)`, 'warn')
 
-    // ── Insertar en lotes usando el nuevo constraint ─────────────
     let partInsertados = 0
     const lotePart = 100
 
@@ -233,7 +232,7 @@ export default function ImportarCapacitaciones() {
         Importación masiva de capacitaciones
       </h2>
       <p style={{ fontSize: '13px', color: '#64748B', marginBottom: '24px' }}>
-        Cargá tu Excel histórico. El sistema crea las capacitaciones y asigna los participantes automáticamente usando la hoja <strong>"Reporte"</strong>.
+        Cargá tu Excel histórico. El sistema crea las capacitaciones y asigna los participantes automáticamente.
       </p>
 
       <div style={{ border: '2px dashed #CBD5E1', borderRadius: '12px', padding: '32px', textAlign: 'center', background: 'white', marginBottom: '20px' }}>
@@ -242,7 +241,7 @@ export default function ImportarCapacitaciones() {
           Seleccioná tu Excel de capacitaciones
         </div>
         <div style={{ fontSize: '12px', color: '#94A3B8', marginBottom: '16px' }}>
-          Debe tener la hoja <strong>"Reporte"</strong> con los datos históricos
+          Compatible con cualquier nombre de hoja
         </div>
         <input
           type="file"
@@ -290,7 +289,7 @@ export default function ImportarCapacitaciones() {
 
       <div style={{ marginTop: '20px', background: 'white', borderRadius: '12px', padding: '18px', border: '1px solid #E2E8F0' }}>
         <div style={{ fontSize: '13px', fontWeight: '600', marginBottom: '10px', color: '#374151' }}>
-          Columnas requeridas en la hoja "Reporte":
+          Columnas requeridas en el Excel:
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px' }}>
           {[
