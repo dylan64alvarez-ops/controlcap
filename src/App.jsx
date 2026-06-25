@@ -115,37 +115,18 @@ export default function App() {
       }
     })
 
-    // Género: correos únicos por género filtrados por año
+    // Género: usando función de Supabase con datos directos de participantes
     const genMap = { FEMENINO: 0, MASCULINO: 0 }
 
-    for (const gen of ['FEMENINO', 'MASCULINO']) {
-      const { data: colsGen } = await supabase
-        .from('colaboradores')
-        .select('correo')
-        .eq('genero', gen)
+    const { data: genData } = await supabase
+      .rpc('get_genero_stats', anioFiltro ? { anio_param: anioFiltro } : { anio_param: null })
 
-      if (colsGen && colsGen.length > 0) {
-        const correosGen = colsGen.map(c => c.correo.toLowerCase().trim())
-
-        let pQ = supabase
-          .from('participantes')
-          .select('correo, capacitaciones(fecha_inicio)')
-          .in('correo', correosGen)
-
-        const { data: pGen } = await pQ
-
-        if (pGen) {
-          const filtrados = anioFiltro
-            ? pGen.filter(p => {
-                const f = p.capacitaciones?.fecha_inicio
-                return f && new Date(f).getFullYear() === anioFiltro
-              })
-            : pGen
-
-          const unicos = new Set(filtrados.map(p => p.correo))
-          genMap[gen] = unicos.size
-        }
-      }
+    if (genData) {
+      genData.forEach(row => {
+        const g = (row.genero || '').toUpperCase()
+        if (g === 'FEMENINO') genMap.FEMENINO = Number(row.personas)
+        else if (g === 'MASCULINO') genMap.MASCULINO = Number(row.personas)
+      })
     }
 
     const totalGen = genMap.FEMENINO + genMap.MASCULINO
