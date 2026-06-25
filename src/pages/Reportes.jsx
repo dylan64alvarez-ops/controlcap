@@ -30,11 +30,9 @@ export default function Reportes() {
       supabase.from('colaboradores').select('gerencia, departamento').order('gerencia'),
       supabase.from('capacitaciones').select('id, nombre, fecha_inicio').order('nombre')
     ])
-
     const gersUnicas = [...new Set((colRes.data || []).map(c => c.gerencia).filter(Boolean))].sort()
-    const capsAnio = (capRes.data || [])
     setGerencias(gersUnicas)
-    setCapacitaciones(capsAnio)
+    setCapacitaciones(capRes.data || [])
   }
 
   useEffect(() => {
@@ -52,7 +50,6 @@ export default function Reportes() {
   }, [filtroGerencia])
 
   async function obtenerDatosFiltrados() {
-    // Obtener capacitaciones del año/filtro
     let qCap = supabase.from('capacitaciones').select('*')
     if (filtroAnio) {
       qCap = qCap.gte('fecha_inicio', `${filtroAnio}-01-01`).lte('fecha_inicio', `${filtroAnio}-12-31`)
@@ -63,7 +60,6 @@ export default function Reportes() {
     const capIds = (caps || []).map(c => c.id)
     if (capIds.length === 0) return { caps: [], parts: [], cols: [] }
 
-    // Obtener colaboradores
     const { data: cols } = await supabase.from('colaboradores').select('*')
     const colById = {}, colByCorreo = {}
     ;(cols || []).forEach(c => {
@@ -71,28 +67,19 @@ export default function Reportes() {
       if (c.correo) colByCorreo[c.correo.toLowerCase().trim()] = c
     })
 
-    // Obtener participantes
-    let qPart = supabase
+    const { data: partsRaw } = await supabase
       .from('participantes')
       .select('*')
       .in('capacitacion_id', capIds)
 
-    const { data: partsRaw } = await qPart
-
-    // Enriquecer participantes
     let parts = (partsRaw || []).map(p => {
       const cap = caps.find(c => c.id === p.capacitacion_id)
       const col = colById[p.colaborador_id] || colByCorreo[p.correo?.toLowerCase().trim()] || null
       return { ...p, _cap: cap, _col: col }
     })
 
-    // Aplicar filtros de gerencia/departamento
-    if (filtroGerencia) {
-      parts = parts.filter(p => p._col?.gerencia === filtroGerencia)
-    }
-    if (filtroDep) {
-      parts = parts.filter(p => p._col?.departamento === filtroDep)
-    }
+    if (filtroGerencia) parts = parts.filter(p => p._col?.gerencia === filtroGerencia)
+    if (filtroDep) parts = parts.filter(p => p._col?.departamento === filtroDep)
 
     return { caps, parts, cols: cols || [] }
   }
@@ -100,13 +87,10 @@ export default function Reportes() {
   async function cargarPreview() {
     setCargandoPreview(true)
     const { caps, parts } = await obtenerDatosFiltrados()
-
     const totalPartic = parts.length
     const totalHoras = parts.reduce((s, p) => s + Number(p.horas || 0), 0)
     const totalCosto = parts.reduce((s, p) => s + Number(p.costo || 0), 0)
     const capsUnicas = new Set(parts.map(p => p.capacitacion_id)).size
-
-    // Por gerencia
     const porGerencia = {}
     parts.forEach(p => {
       const g = p._col?.gerencia || 'Sin gerencia'
@@ -115,7 +99,6 @@ export default function Reportes() {
       porGerencia[g].horas += Number(p.horas || 0)
       porGerencia[g].costo += Number(p.costo || 0)
     })
-
     setPreview({ totalPartic, totalHoras, totalCosto, capsUnicas, porGerencia, caps, parts })
     setCargandoPreview(false)
   }
@@ -123,12 +106,10 @@ export default function Reportes() {
   async function generarPDF() {
     setGenerando('pdf')
     const { caps, parts } = await obtenerDatosFiltrados()
-
     const totalPartic = parts.length
     const totalHoras = parts.reduce((s, p) => s + Number(p.horas || 0), 0)
     const totalCosto = parts.reduce((s, p) => s + Number(p.costo || 0), 0)
     const capsUnicas = new Set(parts.map(p => p.capacitacion_id)).size
-
     const porGerencia = {}
     parts.forEach(p => {
       const g = p._col?.gerencia || 'Sin gerencia'
@@ -137,11 +118,9 @@ export default function Reportes() {
       porGerencia[g].horas += Number(p.horas || 0)
       porGerencia[g].costo += Number(p.costo || 0)
     })
-
     const filtroDesc = [
       filtroAnio ? `Año ${filtroAnio}` : 'Todos los años',
-      filtroGerencia || '',
-      filtroDep || '',
+      filtroGerencia || '', filtroDep || '',
       filtroCap ? caps.find(c => c.id === filtroCap)?.nombre || '' : ''
     ].filter(Boolean).join(' · ')
 
@@ -183,7 +162,6 @@ export default function Reportes() {
 <div class="content">
   <div class="report-title">Informe de Capacitación</div>
   <div class="report-date">Generado el ${new Date().toLocaleDateString('es-CR', { year:'numeric', month:'long', day:'numeric' })}</div>
-
   <div class="kpis">
     <div class="kpi" style="border-color:#8131B0;background:#F5EEFF">
       <div class="kpi-label">Capacitaciones</div>
@@ -202,7 +180,6 @@ export default function Reportes() {
       <div class="kpi-val" style="color:#DA2B1F">₡${Math.round(totalCosto).toLocaleString()}</div>
     </div>
   </div>
-
   <div class="section">
     <div class="section-title">Resumen por Gerencia</div>
     <table>
@@ -214,29 +191,30 @@ export default function Reportes() {
       </tbody>
     </table>
   </div>
-
   <div class="section">
     <div class="section-title">Capacitaciones</div>
     <table>
-      <thead><tr><th>Nombre</th><th>Categoría</th><th>Facilitador</th><th>Horas</th><th>Fecha inicio</th></tr></thead>
+      <thead><tr><th>Nombre</th><th>Categoría</th><th>Facilitador</th><th>Horas</th><th>Participantes</th><th>Costo total</th></tr></thead>
       <tbody>
-        ${[...new Map(parts.map(p => [p.capacitacion_id, p._cap])).values()].filter(Boolean).map(c => `
-          <tr><td>${c.nombre}</td><td>${c.categoria||'—'}</td><td>${c.facilitador||'—'}</td><td>${c.horas}h</td><td>${c.fecha_inicio||'—'}</td></tr>
-        `).join('')}
+        ${[...new Map(parts.map(p => [p.capacitacion_id, p._cap])).values()].filter(Boolean).map(c => {
+          const ps = parts.filter(p => p.capacitacion_id === c.id)
+          const ct = ps.reduce((s, p) => s + Number(p.costo || 0), 0)
+          return `<tr><td>${c.nombre}</td><td>${c.categoria||'—'}</td><td>${c.facilitador||'—'}</td><td>${c.horas}h</td><td>${ps.length}</td><td>₡${Math.round(ct).toLocaleString()}</td></tr>`
+        }).join('')}
       </tbody>
     </table>
   </div>
-
   <div class="section">
     <div class="section-title">Detalle de Participantes</div>
     <table>
-      <thead><tr><th>Colaborador</th><th>Correo</th><th>Gerencia</th><th>Puesto</th><th>Capacitación</th><th>Horas</th><th>Costo</th></tr></thead>
+      <thead><tr><th>Colaborador</th><th>Correo</th><th>Gerencia</th><th>Departamento</th><th>Puesto</th><th>Capacitación</th><th>Horas</th><th>Costo</th></tr></thead>
       <tbody>
         ${parts.map(p => `
           <tr>
             <td>${p._col?.nombre||'—'}</td>
             <td>${(!p.correo||p.correo.startsWith('sin-correo')) ? '—' : p.correo}</td>
             <td>${p._col?.gerencia||'—'}</td>
+            <td>${p._col?.departamento||'—'}</td>
             <td>${p._col?.puesto||'—'}</td>
             <td>${p._cap?.nombre||'—'}</td>
             <td>${p.horas||0}h</td>
@@ -266,7 +244,6 @@ export default function Reportes() {
       const { caps, parts, cols } = await obtenerDatosFiltrados()
       const wb = XLSX.utils.book_new()
 
-      // Hoja 1: Resumen
       const porGerencia = {}
       parts.forEach(p => {
         const g = p._col?.gerencia || 'Sin gerencia'
@@ -283,7 +260,6 @@ export default function Reportes() {
       }))
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumen.length ? resumen : [{}]), 'Resumen por Gerencia')
 
-      // Hoja 2: Participantes
       const partsSheet = parts.map(p => ({
         Colaborador: p._col?.nombre || '—',
         Correo: (!p.correo || p.correo.startsWith('sin-correo')) ? '—' : p.correo,
@@ -301,7 +277,6 @@ export default function Reportes() {
       }))
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(partsSheet.length ? partsSheet : [{}]), 'Participantes')
 
-      // Hoja 3: Capacitaciones
       const capsUnicas = [...new Map(parts.map(p => [p.capacitacion_id, p._cap])).values()].filter(Boolean)
       const capsSheet = capsUnicas.map(c => ({
         Nombre: c.nombre,
@@ -313,13 +288,11 @@ export default function Reportes() {
         'Fecha inicio': c.fecha_inicio || '—',
         'Fecha fin': c.fecha_fin || '—',
         Horas: c.horas || 0,
-        'Costo unitario (₡)': Math.round(c.costo || 0),
         Participantes: parts.filter(p => p.capacitacion_id === c.id).length,
         'Costo total (₡)': Math.round(parts.filter(p => p.capacitacion_id === c.id).reduce((s, p) => s + Number(p.costo || 0), 0))
       }))
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(capsSheet.length ? capsSheet : [{}]), 'Capacitaciones')
 
-      // Hoja 4: Colaboradores
       const colsSheet = cols.map(c => ({
         Nombre: c.nombre,
         Correo: c.correo,
@@ -335,8 +308,8 @@ export default function Reportes() {
       }))
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(colsSheet.length ? colsSheet : [{}]), 'Colaboradores')
 
-      const filtroDesc = [filtroAnio, filtroGerencia, filtroDep].filter(Boolean).join('_') || 'General'
-      XLSX.writeFile(wb, `ControlCap_${filtroDesc}_${new Date().toISOString().slice(0,10)}.xlsx`)
+      const filtroFile = [filtroAnio, filtroGerencia, filtroDep].filter(Boolean).join('_') || 'General'
+      XLSX.writeFile(wb, `ControlCap_${filtroFile}_${new Date().toISOString().slice(0,10)}.xlsx`)
     } catch(e) {
       alert('Error generando Excel: ' + e.message)
     }
@@ -346,7 +319,7 @@ export default function Reportes() {
   async function generarPPTX() {
     setGenerando('pptx')
     try {
-      const PptxGenJS = (await import('https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js')).default
+      const PptxGenJS = (await import('pptxgenjs')).default
 
       const { caps, parts } = await obtenerDatosFiltrados()
       const totalPartic = parts.length
@@ -366,7 +339,6 @@ export default function Reportes() {
 
       const pptx = new PptxGenJS()
       pptx.layout = 'LAYOUT_WIDE'
-      pptx.author = 'ControlCap · CoopeAnde'
 
       const NAVY = '1B2560'
       const YELLOW = 'FFCF00'
@@ -379,23 +351,22 @@ export default function Reportes() {
 
       const filtroDesc = [
         filtroAnio ? `Año ${filtroAnio}` : 'Todos los años',
-        filtroGerencia || '',
-        filtroDep || ''
+        filtroGerencia || '', filtroDep || ''
       ].filter(Boolean).join(' · ')
 
       // ── SLIDE 1: Portada ──────────────────────────────────────
       const s1 = pptx.addSlide()
       s1.background = { color: NAVY }
       s1.addShape(pptx.ShapeType.rect, { x: 0, y: 4.5, w: 13.33, h: 3.0, fill: { color: PURPLE }, line: { color: PURPLE } })
-      s1.addText('Control', { x: 0.6, y: 0.5, w: 3, h: 0.8, fontSize: 40, bold: true, color: YELLOW, fontFace: 'Arial' })
-      s1.addText('Cap', { x: 2.05, y: 0.5, w: 2, h: 0.8, fontSize: 40, bold: true, color: WHITE, fontFace: 'Arial' })
-      s1.addText('Universidad Corporativa · CoopeAnde N.º 1', { x: 0.6, y: 1.25, w: 8, h: 0.4, fontSize: 13, color: 'AABCDE', fontFace: 'Arial' })
-      s1.addText('Informe de Capacitación', { x: 0.6, y: 2.0, w: 11, h: 1.0, fontSize: 36, bold: true, color: WHITE, fontFace: 'Arial' })
+      s1.addText('Control', { x: 0.6, y: 0.5, w: 2.5, h: 0.8, fontSize: 40, bold: true, color: YELLOW, fontFace: 'Arial' })
+      s1.addText('Cap', { x: 2.6, y: 0.5, w: 2, h: 0.8, fontSize: 40, bold: true, color: WHITE, fontFace: 'Arial' })
+      s1.addText('Universidad Corporativa · CoopeAnde N.º 1', { x: 0.6, y: 1.4, w: 9, h: 0.4, fontSize: 13, color: 'AABCDE', fontFace: 'Arial' })
+      s1.addText('Informe de Capacitación', { x: 0.6, y: 2.1, w: 11, h: 0.9, fontSize: 34, bold: true, color: WHITE, fontFace: 'Arial' })
       s1.addText(filtroDesc, { x: 0.6, y: 3.1, w: 10, h: 0.5, fontSize: 16, color: YELLOW, fontFace: 'Arial' })
       s1.addText(new Date().toLocaleDateString('es-CR', { year:'numeric', month:'long', day:'numeric' }), { x: 0.6, y: 4.7, w: 8, h: 0.4, fontSize: 13, color: WHITE, fontFace: 'Arial' })
-      s1.addText('Uso interno exclusivo', { x: 0.6, y: 5.2, w: 8, h: 0.4, fontSize: 11, color: 'AAAACC', fontFace: 'Arial' })
+      s1.addText('Uso interno exclusivo', { x: 0.6, y: 5.2, w: 8, h: 0.35, fontSize: 11, color: 'AAAACC', fontFace: 'Arial' })
 
-      // ── SLIDE 2: KPIs ────────────────────────────────────────
+      // ── SLIDE 2: KPIs ─────────────────────────────────────────
       const s2 = pptx.addSlide()
       s2.background = { color: LIGHT }
       s2.addText('Resumen Ejecutivo', { x: 0.5, y: 0.3, w: 12, h: 0.6, fontSize: 24, bold: true, color: NAVY, fontFace: 'Arial' })
@@ -409,50 +380,47 @@ export default function Reportes() {
       ]
       kpis.forEach((k, i) => {
         const x = 0.4 + i * 3.15
-        s2.addShape(pptx.ShapeType.rect, { x, y: 1.5, w: 2.9, h: 1.8, fill: { color: WHITE }, line: { color: 'E2E8F0', pt: 1 }, shadow: { type: 'outer', blur: 4, offset: 2, angle: 45, color: '00000015' } })
+        s2.addShape(pptx.ShapeType.rect, { x, y: 1.5, w: 2.9, h: 1.8, fill: { color: WHITE }, line: { color: 'E2E8F0', pt: 1 } })
         s2.addShape(pptx.ShapeType.rect, { x, y: 1.5, w: 0.08, h: 1.8, fill: { color: k.color }, line: { color: k.color } })
         s2.addText(k.label.toUpperCase(), { x: x + 0.2, y: 1.65, w: 2.6, h: 0.3, fontSize: 9, color: GRAY, fontFace: 'Arial', bold: true })
-        s2.addText(k.val, { x: x + 0.2, y: 2.0, w: 2.6, h: 0.8, fontSize: 26, bold: true, color: k.color, fontFace: 'Arial' })
+        s2.addText(k.val, { x: x + 0.2, y: 2.05, w: 2.6, h: 0.8, fontSize: 24, bold: true, color: k.color, fontFace: 'Arial' })
       })
 
-      // ── SLIDE 3: Por Gerencia ────────────────────────────────
+      // ── SLIDE 3: Participaciones por Gerencia ─────────────────
       const s3 = pptx.addSlide()
       s3.background = { color: WHITE }
       s3.addText('Participaciones por Gerencia', { x: 0.5, y: 0.3, w: 12, h: 0.55, fontSize: 22, bold: true, color: NAVY, fontFace: 'Arial' })
-
       const maxPartic = Math.max(...gerArr.map(([,d]) => d.partic), 1)
       gerArr.forEach(([g, d], i) => {
         const y = 1.1 + i * 0.72
         const barW = (d.partic / maxPartic) * 7.5
         const label = g.replace('Gerencia de ', '').replace('Gerencia ', '').replace('Gerencia De ', '')
-        s3.addText(label.length > 30 ? label.slice(0,28)+'...' : label, { x: 0.4, y, w: 3.8, h: 0.45, fontSize: 11, color: NAVY, fontFace: 'Arial', valign: 'middle' })
+        s3.addText(label.length > 28 ? label.slice(0,26)+'...' : label, { x: 0.4, y, w: 3.8, h: 0.45, fontSize: 11, color: NAVY, fontFace: 'Arial', valign: 'middle' })
         s3.addShape(pptx.ShapeType.rect, { x: 4.3, y: y + 0.05, w: 8.0, h: 0.35, fill: { color: 'E2E8F0' }, line: { color: 'E2E8F0' } })
         s3.addShape(pptx.ShapeType.rect, { x: 4.3, y: y + 0.05, w: Math.max(barW, 0.1), h: 0.35, fill: { color: BLUE }, line: { color: BLUE } })
         s3.addText(d.partic.toString(), { x: 12.4, y, w: 0.8, h: 0.45, fontSize: 11, bold: true, color: BLUE, fontFace: 'Arial', align: 'right' })
       })
 
-      // ── SLIDE 4: Costo por Gerencia ──────────────────────────
+      // ── SLIDE 4: Costo por Gerencia ───────────────────────────
       const s4 = pptx.addSlide()
       s4.background = { color: WHITE }
       s4.addText('Costo Ejecutado por Gerencia', { x: 0.5, y: 0.3, w: 12, h: 0.55, fontSize: 22, bold: true, color: NAVY, fontFace: 'Arial' })
-
       const gerCosto = Object.entries(porGerencia).sort((a,b) => b[1].costo - a[1].costo).slice(0, 8)
       const maxCosto = Math.max(...gerCosto.map(([,d]) => d.costo), 1)
       gerCosto.forEach(([g, d], i) => {
         const y = 1.1 + i * 0.72
         const barW = (d.costo / maxCosto) * 7.5
         const label = g.replace('Gerencia de ', '').replace('Gerencia ', '').replace('Gerencia De ', '')
-        s4.addText(label.length > 30 ? label.slice(0,28)+'...' : label, { x: 0.4, y, w: 3.8, h: 0.45, fontSize: 11, color: NAVY, fontFace: 'Arial', valign: 'middle' })
+        s4.addText(label.length > 28 ? label.slice(0,26)+'...' : label, { x: 0.4, y, w: 3.8, h: 0.45, fontSize: 11, color: NAVY, fontFace: 'Arial', valign: 'middle' })
         s4.addShape(pptx.ShapeType.rect, { x: 4.3, y: y + 0.05, w: 8.0, h: 0.35, fill: { color: 'E2E8F0' }, line: { color: 'E2E8F0' } })
         s4.addShape(pptx.ShapeType.rect, { x: 4.3, y: y + 0.05, w: Math.max(barW, 0.1), h: 0.35, fill: { color: RED }, line: { color: RED } })
-        s4.addText('₡' + Math.round(d.costo).toLocaleString(), { x: 12.0, y, w: 1.2, h: 0.45, fontSize: 10, bold: true, color: RED, fontFace: 'Arial', align: 'right' })
+        s4.addText('₡' + Math.round(d.costo).toLocaleString(), { x: 11.8, y, w: 1.4, h: 0.45, fontSize: 10, bold: true, color: RED, fontFace: 'Arial', align: 'right' })
       })
 
-      // ── SLIDE 5: Top Capacitaciones ──────────────────────────
+      // ── SLIDE 5: Top Capacitaciones ───────────────────────────
       const s5 = pptx.addSlide()
       s5.background = { color: LIGHT }
       s5.addText('Top Capacitaciones', { x: 0.5, y: 0.3, w: 12, h: 0.55, fontSize: 22, bold: true, color: NAVY, fontFace: 'Arial' })
-
       const capCount = {}
       parts.forEach(p => {
         const id = p.capacitacion_id
@@ -462,7 +430,6 @@ export default function Reportes() {
         capCount[id].costo += Number(p.costo || 0)
       })
       const topCaps = Object.values(capCount).sort((a,b) => b.partic - a.partic).slice(0, 8)
-
       const rows = [
         [
           { text: 'Capacitación', options: { bold: true, color: WHITE, fill: NAVY, fontSize: 10 } },
@@ -471,7 +438,7 @@ export default function Reportes() {
           { text: 'Costo total', options: { bold: true, color: WHITE, fill: NAVY, fontSize: 10, align: 'right' } },
         ],
         ...topCaps.map((c, i) => [
-          { text: c.nombre.length > 50 ? c.nombre.slice(0,48)+'...' : c.nombre, options: { fontSize: 10, fill: i%2===0 ? WHITE : LIGHT } },
+          { text: c.nombre.length > 55 ? c.nombre.slice(0,53)+'...' : c.nombre, options: { fontSize: 10, fill: i%2===0 ? WHITE : LIGHT } },
           { text: c.partic.toString(), options: { fontSize: 10, align: 'center', fill: i%2===0 ? WHITE : LIGHT } },
           { text: c.horas + 'h', options: { fontSize: 10, align: 'center', fill: i%2===0 ? WHITE : LIGHT } },
           { text: '₡' + Math.round(c.costo).toLocaleString(), options: { fontSize: 10, align: 'right', fill: i%2===0 ? WHITE : LIGHT } },
@@ -479,16 +446,16 @@ export default function Reportes() {
       ]
       s5.addTable(rows, { x: 0.5, y: 1.0, w: 12.3, colW: [7.5, 1.5, 1.2, 2.1], border: { type: 'solid', pt: 0.5, color: 'E2E8F0' } })
 
-      // ── SLIDE 6: Cierre ──────────────────────────────────────
+      // ── SLIDE 6: Cierre ───────────────────────────────────────
       const s6 = pptx.addSlide()
       s6.background = { color: NAVY }
       s6.addShape(pptx.ShapeType.rect, { x: 0, y: 3.2, w: 13.33, h: 0.08, fill: { color: YELLOW }, line: { color: YELLOW } })
-      s6.addText('Control', { x: 4.5, y: 0.8, w: 2.2, h: 0.9, fontSize: 42, bold: true, color: YELLOW, fontFace: 'Arial' })
-      s6.addText('Cap', { x: 6.3, y: 0.8, w: 2, h: 0.9, fontSize: 42, bold: true, color: WHITE, fontFace: 'Arial' })
-      s6.addText('Universidad Corporativa', { x: 2, y: 1.8, w: 9.33, h: 0.5, fontSize: 18, color: 'AABCDE', fontFace: 'Arial', align: 'center' })
-      s6.addText('CoopeAnde N.º 1', { x: 2, y: 2.3, w: 9.33, h: 0.45, fontSize: 14, color: 'AABCDE', fontFace: 'Arial', align: 'center' })
+      s6.addText('Control', { x: 4.2, y: 0.8, w: 2.4, h: 0.9, fontSize: 42, bold: true, color: YELLOW, fontFace: 'Arial' })
+      s6.addText('Cap', { x: 6.2, y: 0.8, w: 2, h: 0.9, fontSize: 42, bold: true, color: WHITE, fontFace: 'Arial' })
+      s6.addText('Universidad Corporativa', { x: 2, y: 1.85, w: 9.33, h: 0.5, fontSize: 18, color: 'AABCDE', fontFace: 'Arial', align: 'center' })
+      s6.addText('CoopeAnde N.º 1', { x: 2, y: 2.4, w: 9.33, h: 0.4, fontSize: 14, color: 'AABCDE', fontFace: 'Arial', align: 'center' })
       s6.addText('Informe generado el ' + new Date().toLocaleDateString('es-CR'), { x: 2, y: 3.6, w: 9.33, h: 0.4, fontSize: 12, color: WHITE, fontFace: 'Arial', align: 'center' })
-      s6.addText('Uso interno exclusivo', { x: 2, y: 4.1, w: 9.33, h: 0.4, fontSize: 11, color: '8899BB', fontFace: 'Arial', align: 'center' })
+      s6.addText('Uso interno exclusivo', { x: 2, y: 4.1, w: 9.33, h: 0.35, fontSize: 11, color: '8899BB', fontFace: 'Arial', align: 'center' })
 
       const filtroFile = [filtroAnio, filtroGerencia, filtroDep].filter(Boolean).join('_') || 'General'
       await pptx.writeFile({ fileName: `ControlCap_${filtroFile}_${new Date().toISOString().slice(0,10)}.pptx` })
@@ -499,10 +466,7 @@ export default function Reportes() {
   }
 
   const inp = { height: '36px', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0 10px', fontSize: '13px', outline: 'none', background: 'white' }
-
-  const capsDelAnio = capacitaciones.filter(c =>
-    !filtroAnio || (c.fecha_inicio && c.fecha_inicio.startsWith(filtroAnio))
-  )
+  const capsDelAnio = capacitaciones.filter(c => !filtroAnio || (c.fecha_inicio && c.fecha_inicio.startsWith(filtroAnio)))
 
   return (
     <div>
@@ -541,7 +505,7 @@ export default function Reportes() {
         </div>
       </div>
 
-      {/* Preview de datos */}
+      {/* Preview KPIs */}
       {preview && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '20px' }}>
           {[
@@ -558,22 +522,22 @@ export default function Reportes() {
         </div>
       )}
 
-      {/* Opciones de reporte */}
+      {/* Botones de reporte */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
         {[
           {
             id: 'pdf', icon: '📄', titulo: 'PDF Ejecutivo',
-            desc: 'Informe completo con KPIs, resumen por gerencia, lista de capacitaciones y detalle de participantes. Listo para imprimir.',
+            desc: 'Informe completo con KPIs, resumen por gerencia, lista de capacitaciones y detalle de participantes.',
             color: COLORS.rojo, accion: generarPDF, boton: 'Generar PDF'
           },
           {
             id: 'excel', icon: '📊', titulo: 'Excel Detallado',
-            desc: 'Archivo con 4 hojas: Resumen por gerencia, Participantes completo, Capacitaciones y Colaboradores.',
+            desc: '4 hojas: Resumen por gerencia, Participantes, Capacitaciones y Colaboradores.',
             color: '#0F9B72', accion: generarExcel, boton: 'Descargar Excel'
           },
           {
             id: 'pptx', icon: '📽️', titulo: 'PowerPoint Ejecutivo',
-            desc: 'Presentación con portada, KPIs, gráficas por gerencia, costo ejecutado y top capacitaciones. Lista para presentar.',
+            desc: 'Presentación con portada, KPIs, gráficas por gerencia, costo ejecutado y top capacitaciones.',
             color: COLORS.morado, accion: generarPPTX, boton: 'Descargar PPTX'
           },
         ].map(r => (
