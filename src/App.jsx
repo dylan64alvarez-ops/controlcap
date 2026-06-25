@@ -42,7 +42,7 @@ export default function App() {
     if (anio !== 'todos') query = query.eq('anio', parseInt(anio))
     const { data: statsData } = await query
 
-    let capacitaciones = 0, colaboradores = 0, participantes = 0, horas = 0
+    let capacitaciones = 0, colaboradores = 0, participantes = 0, horas = 0, presupuesto = 0
 
     if (statsData && statsData.length > 0) {
       if (anio !== 'todos') {
@@ -51,6 +51,7 @@ export default function App() {
         colaboradores  = Number(row.colaboradores_unicos || 0)
         participantes  = Number(row.total_participantes || 0)
         horas          = Number(row.total_horas || 0)
+        presupuesto    = Number(row.total_costo || 0)
       } else {
         const { data: totales } = await supabase.rpc('get_totales_globales').maybeSingle()
         if (totales) {
@@ -62,6 +63,7 @@ export default function App() {
           statsData.forEach(r => {
             participantes += Number(r.total_participantes || 0)
             horas         += Number(r.total_horas || 0)
+            presupuesto   += Number(r.total_costo || 0)
           })
           const { count: cCap } = await supabase.from('capacitaciones').select('*', { count: 'exact', head: true })
           const { count: cCol } = await supabase.from('colaboradores').select('*', { count: 'exact', head: true })
@@ -71,10 +73,7 @@ export default function App() {
       }
     }
 
-    const { data: preData } = await supabase.from('presupuesto').select('importe').eq('cd', 'CR')
-    const totalPre = preData?.reduce((s, r) => s + Number(r.importe), 0) || 0
-    setStats({ capacitaciones, colaboradores, participantes, horas, presupuesto: totalPre })
-
+    setStats({ capacitaciones, colaboradores, participantes, horas, presupuesto })
     await cargarGraficas()
     setCargando(false)
   }
@@ -82,7 +81,6 @@ export default function App() {
   async function cargarGraficas() {
     const anioFiltro = anio !== 'todos' ? parseInt(anio) : null
 
-    // Datos de gerencia/departamento/mensual desde la vista
     let q = supabase.from('stats_graficas').select('*')
     if (anioFiltro) q = q.eq('anio', anioFiltro)
     const { data } = await q
@@ -115,9 +113,8 @@ export default function App() {
       }
     })
 
-    // Género: usando función de Supabase con datos directos de participantes
+    // Género
     const genMap = { FEMENINO: 0, MASCULINO: 0 }
-
     const { data: genData } = await supabase
       .rpc('get_genero_stats', anioFiltro ? { anio_param: anioFiltro } : { anio_param: null })
 
@@ -412,7 +409,7 @@ export default function App() {
                   { label: 'Colaboradores',    valor: stats.colaboradores.toLocaleString(),  color: COLORS.amarillo, icon: '📋', sub: 'únicos por correo',  dest: 'colaboradores' },
                   { label: 'Participaciones',  valor: stats.participantes.toLocaleString(),  color: COLORS.azul,     icon: '👥', sub: 'registros totales',  dest: 'participantes' },
                   { label: 'Horas impartidas', valor: stats.horas.toLocaleString(),          color: COLORS.morado,   icon: '⏱️', sub: 'total acumulado',    dest: 'capacitaciones' },
-                  { label: 'Presupuesto (CR)', valor: '₡' + stats.presupuesto.toLocaleString(), color: COLORS.rojo,  icon: '💰', sub: 'ejecutado',          dest: 'presupuesto' },
+                  { label: 'Presupuesto (CR)', valor: '₡' + Math.round(stats.presupuesto).toLocaleString(), color: COLORS.rojo, icon: '💰', sub: 'costo ejecutado', dest: 'presupuesto' },
                 ].map(kpi => (
                   <div key={kpi.label} onClick={() => irA(kpi.dest)}
                     style={{ background: 'white', borderRadius: '12px', padding: '18px', borderLeft: `4px solid ${kpi.color}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', cursor: 'pointer' }}>
