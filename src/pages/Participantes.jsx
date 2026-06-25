@@ -10,7 +10,6 @@ export default function Participantes({ onCambio }) {
   const [participantes, setParticipantes] = useState([])
   const [capacitaciones, setCapacitaciones] = useState([])
   const [colaboradores, setColaboradores] = useState([])
-  const [colMap, setColMap] = useState({})
   const [modal, setModal] = useState(false)
   const [busquedaColab, setBusquedaColab] = useState('')
   const [resultados, setResultados] = useState([])
@@ -26,25 +25,38 @@ export default function Participantes({ onCambio }) {
   async function cargar() {
     setCargando(true)
 
+    // Cargar todo por separado sin JOINs
     const [pRes, cRes, colRes] = await Promise.all([
-      supabase
-        .from('participantes')
-        .select('id, capacitacion_id, colaborador_id, correo, horas, genero, capacitaciones(id, nombre, horas)')
-        .order('created_at', { ascending: false })
-        .limit(500),
-      supabase.from('capacitaciones').select('id, nombre, horas').order('nombre'),
+      supabase.from('participantes').select('*').order('created_at', { ascending: false }).limit(500),
+      supabase.from('capacitaciones').select('id, nombre, horas, fecha_inicio').order('nombre'),
       supabase.from('colaboradores').select('id, nombre, correo, gerencia, departamento, puesto').order('nombre')
     ])
 
-    if (cRes.data) setCapacitaciones(cRes.data)
-    if (colRes.data) {
-      setColaboradores(colRes.data)
-      // Crear mapa correo → colaborador para lookup rápido
-      const map = {}
-      colRes.data.forEach(c => { map[c.correo?.toLowerCase().trim()] = c })
-      setColMap(map)
-    }
-    if (pRes.data) setParticipantes(pRes.data)
+    const caps = cRes.data || []
+    const cols = colRes.data || []
+    const parts = pRes.data || []
+
+    // Crear mapas para lookup
+    const capMap = {}
+    caps.forEach(c => { capMap[c.id] = c })
+
+    const colByIdMap = {}
+    const colByCorreoMap = {}
+    cols.forEach(c => {
+      colByIdMap[c.id] = c
+      if (c.correo) colByCorreoMap[c.correo.toLowerCase().trim()] = c
+    })
+
+    // Enriquecer participantes
+    const enriquecidos = parts.map(p => {
+      const cap = capMap[p.capacitacion_id] || null
+      const col = colByIdMap[p.colaborador_id] || colByCorreoMap[p.correo?.toLowerCase().trim()] || null
+      return { ...p, _cap: cap, _col: col }
+    })
+
+    setParticipantes(enriquecidos)
+    setCapacitaciones(caps)
+    setColaboradores(cols)
     setCargando(false)
   }
 
@@ -59,56 +71,24 @@ export default function Participantes({ onCambio }) {
     )
   }, [busquedaColab, colaboradores])
 
-  // Enriquecer participante con datos de colaborador via correo
-  function enrichParticipante(p) {
-    if (p.colaborador_id && p.colaboradores) return p
-    const correo = p.correo?.toLowerCase().trim()
-    const col = correo ? colMap[correo] : null
-    return { ...p, _col: col }
-  }
-
-  function getNombre(p) {
-    const e = enrichParticipante(p)
-    return e.colaboradores?.nombre || e._col?.nombre || '—'
-  }
-
-  function getCorreo(p) {
-    const correo = p.correo || ''
-    if (!correo || correo.startsWith('sin-correo__')) return '—'
-    return correo
-  }
-
-  function getGerencia(p) {
-    const e = enrichParticipante(p)
-    return e.colaboradores?.gerencia || e._col?.gerencia || '—'
-  }
-
-  function getPuesto(p) {
-    const e = enrichParticipante(p)
-    return e.colaboradores?.puesto || e._col?.puesto || '—'
-  }
-
-  // Filtrar
   const filtrados = participantes.filter(p => {
     const matchCap = !filtroCap || p.capacitacion_id === filtroCap
     if (!busqueda) return matchCap
     const t = busqueda.toLowerCase()
-    const nombre = getNombre(p).toLowerCase()
+    const nombre = (p._col?.nombre || '').toLowerCase()
     const correo = (p.correo || '').toLowerCase()
-    const cap = (p.capacitaciones?.nombre || '').toLowerCase()
+    const cap = (p._cap?.nombre || '').toLowerCase()
     return matchCap && (nombre.includes(t) || correo.includes(t) || cap.includes(t))
   })
 
   async function agregar(colaborador) {
     if (!capSeleccionada) { alert('Seleccioná una capacitación primero'); return }
-
     const yaExiste = participantes.find(
       p => p.colaborador_id === colaborador.id && p.capacitacion_id === capSeleccionada
     )
     if (yaExiste) { alert('Este colaborador ya está en esa capacitación'); return }
 
     const cap = capacitaciones.find(c => c.id === capSeleccionada)
-
     setGuardando(true)
     const { error } = await supabase.from('participantes').insert([{
       capacitacion_id: capSeleccionada,
@@ -145,7 +125,7 @@ export default function Participantes({ onCambio }) {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <div style={{ fontSize: '13px', color: '#64748B' }}>
-          {cargando ? 'Cargando...' : `${filtrados.length} participantes${filtroCap || busqueda ? ' (filtrados)' : ''}`}
+          {cargando ? 'Cargando...' : `${filtrados.length} participantes${filtroCap || busqueda ? ' (filtrados)' : ''} · mostrando primeros 200`}
         </div>
         <button onClick={() => setModal(true)}
           style={{ background: '#8131B0', color: 'white', border: 'none', padding: '8px 18px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>
@@ -181,7 +161,7 @@ export default function Participantes({ onCambio }) {
           <div style={{ padding: '50px', textAlign: 'center', color: '#94A3B8' }}>
             <div style={{ fontSize: '32px', marginBottom: '10px' }}>👥</div>
             <div style={{ fontWeight: '500', marginBottom: '6px' }}>No hay participantes</div>
-            <div style={{ fontSize: '13px' }}>Ajustá los filtros o agregá colaboradores a una capacitación</div>
+            <div style={{ fontSize: '13px' }}>Ajustá los filtros o usá una capacitación específica</div>
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
@@ -194,24 +174,27 @@ export default function Participantes({ onCambio }) {
                 </tr>
               </thead>
               <tbody>
-                {filtrados.slice(0, 200).map((p, i) => (
-                  <tr key={p.id} style={{ background: i % 2 === 0 ? 'white' : '#FAFAFA' }}>
-                    <td style={{ padding: '10px 12px', fontWeight: '500', fontSize: '13px', whiteSpace: 'nowrap' }}>{getNombre(p)}</td>
-                    <td style={{ padding: '10px 12px', fontSize: '12px', color: '#0072DA' }}>{getCorreo(p)}</td>
-                    <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{getGerencia(p)}</td>
-                    <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{getPuesto(p)}</td>
-                    <td style={{ padding: '10px 12px', fontSize: '12px', color: '#374151', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.capacitaciones?.nombre}</td>
-                    <td style={{ padding: '10px 12px', fontSize: '13px', fontWeight: '600', color: '#0F9B72' }}>{p.horas || p.capacitaciones?.horas || 0}h</td>
-                    <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>
-                      {p.genero === 'FEMENINO' ? '♀ F' : p.genero === 'MASCULINO' ? '♂ M' : '—'}
-                    </td>
-                  </tr>
-                ))}
+                {filtrados.slice(0, 200).map((p, i) => {
+                  const correoMostrar = (!p.correo || p.correo.startsWith('sin-correo__')) ? '—' : p.correo
+                  return (
+                    <tr key={p.id} style={{ background: i % 2 === 0 ? 'white' : '#FAFAFA' }}>
+                      <td style={{ padding: '10px 12px', fontWeight: '500', fontSize: '13px', whiteSpace: 'nowrap' }}>{p._col?.nombre || '—'}</td>
+                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#0072DA' }}>{correoMostrar}</td>
+                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{p._col?.gerencia || '—'}</td>
+                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{p._col?.puesto || '—'}</td>
+                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#374151', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p._cap?.nombre || '—'}</td>
+                      <td style={{ padding: '10px 12px', fontSize: '13px', fontWeight: '600', color: '#0F9B72' }}>{p.horas || 0}h</td>
+                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>
+                        {p.genero === 'FEMENINO' ? '♀ F' : p.genero === 'MASCULINO' ? '♂ M' : '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
             {filtrados.length > 200 && (
               <div style={{ padding: '12px', textAlign: 'center', fontSize: '12px', color: '#94A3B8', borderTop: '1px solid #E2E8F0' }}>
-                Mostrando 200 de {filtrados.length} registros. Usá los filtros para ver más.
+                Mostrando 200 de {filtrados.length}. Usá los filtros para ver más.
               </div>
             )}
           </div>
