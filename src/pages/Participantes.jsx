@@ -10,6 +10,7 @@ export default function Participantes({ onCambio }) {
   const [participantes, setParticipantes] = useState([])
   const [capacitaciones, setCapacitaciones] = useState([])
   const [colaboradores, setColaboradores] = useState([])
+  const [colMap, setColMap] = useState({})
   const [modal, setModal] = useState(false)
   const [busquedaColab, setBusquedaColab] = useState('')
   const [resultados, setResultados] = useState([])
@@ -25,35 +26,25 @@ export default function Participantes({ onCambio }) {
   async function cargar() {
     setCargando(true)
 
-    // Cargar participantes con LEFT JOIN a colaboradores y capacitaciones
-    const { data: pData } = await supabase
-      .from('participantes')
-      .select(`
-        id,
-        capacitacion_id,
-        colaborador_id,
-        correo,
-        horas,
-        genero,
-        capacitaciones (id, nombre, horas, fecha_inicio),
-        colaboradores (nombre, correo, gerencia, departamento, puesto)
-      `)
-      .order('created_at', { ascending: false })
-      .limit(500)
+    const [pRes, cRes, colRes] = await Promise.all([
+      supabase
+        .from('participantes')
+        .select('id, capacitacion_id, colaborador_id, correo, horas, genero, capacitaciones(id, nombre, horas)')
+        .order('created_at', { ascending: false })
+        .limit(500),
+      supabase.from('capacitaciones').select('id, nombre, horas').order('nombre'),
+      supabase.from('colaboradores').select('id, nombre, correo, gerencia, departamento, puesto').order('nombre')
+    ])
 
-    const { data: cData } = await supabase
-      .from('capacitaciones')
-      .select('id, nombre, horas')
-      .order('nombre')
-
-    const { data: colData } = await supabase
-      .from('colaboradores')
-      .select('id, nombre, correo, gerencia, puesto')
-      .order('nombre')
-
-    if (pData) setParticipantes(pData)
-    if (cData) setCapacitaciones(cData)
-    if (colData) setColaboradores(colData)
+    if (cRes.data) setCapacitaciones(cRes.data)
+    if (colRes.data) {
+      setColaboradores(colRes.data)
+      // Crear mapa correo → colaborador para lookup rápido
+      const map = {}
+      colRes.data.forEach(c => { map[c.correo?.toLowerCase().trim()] = c })
+      setColMap(map)
+    }
+    if (pRes.data) setParticipantes(pRes.data)
     setCargando(false)
   }
 
@@ -68,18 +59,44 @@ export default function Participantes({ onCambio }) {
     )
   }, [busquedaColab, colaboradores])
 
-  // Filtrar por capacitación y búsqueda
+  // Enriquecer participante con datos de colaborador via correo
+  function enrichParticipante(p) {
+    if (p.colaborador_id && p.colaboradores) return p
+    const correo = p.correo?.toLowerCase().trim()
+    const col = correo ? colMap[correo] : null
+    return { ...p, _col: col }
+  }
+
+  function getNombre(p) {
+    const e = enrichParticipante(p)
+    return e.colaboradores?.nombre || e._col?.nombre || '—'
+  }
+
+  function getCorreo(p) {
+    const correo = p.correo || ''
+    if (!correo || correo.startsWith('sin-correo__')) return '—'
+    return correo
+  }
+
+  function getGerencia(p) {
+    const e = enrichParticipante(p)
+    return e.colaboradores?.gerencia || e._col?.gerencia || '—'
+  }
+
+  function getPuesto(p) {
+    const e = enrichParticipante(p)
+    return e.colaboradores?.puesto || e._col?.puesto || '—'
+  }
+
+  // Filtrar
   const filtrados = participantes.filter(p => {
     const matchCap = !filtroCap || p.capacitacion_id === filtroCap
-    const termino = busqueda.toLowerCase()
-    const nombre = p.colaboradores?.nombre || ''
-    const correo = p.correo || p.colaboradores?.correo || ''
-    const cap = p.capacitaciones?.nombre || ''
-    const matchBusq = !busqueda ||
-      nombre.toLowerCase().includes(termino) ||
-      correo.toLowerCase().includes(termino) ||
-      cap.toLowerCase().includes(termino)
-    return matchCap && matchBusq
+    if (!busqueda) return matchCap
+    const t = busqueda.toLowerCase()
+    const nombre = getNombre(p).toLowerCase()
+    const correo = (p.correo || '').toLowerCase()
+    const cap = (p.capacitaciones?.nombre || '').toLowerCase()
+    return matchCap && (nombre.includes(t) || correo.includes(t) || cap.includes(t))
   })
 
   async function agregar(colaborador) {
@@ -113,17 +130,6 @@ export default function Participantes({ onCambio }) {
     setGuardando(false)
   }
 
-  // Obtener nombre y correo del participante (puede venir de colaboradores o directo)
-  function getNombre(p) {
-    return p.colaboradores?.nombre || '—'
-  }
-
-  function getCorreo(p) {
-    const correo = p.correo || p.colaboradores?.correo || ''
-    if (correo.startsWith('sin-correo__')) return '—'
-    return correo
-  }
-
   const inp = {
     height: '36px', border: '1px solid #E2E8F0', borderRadius: '8px',
     padding: '0 10px', fontSize: '13px', width: '100%', outline: 'none', background: 'white'
@@ -137,23 +143,23 @@ export default function Participantes({ onCambio }) {
         </div>
       )}
 
-      {/* Encabezado */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <div style={{ fontSize: '13px', color: '#64748B' }}>{filtrados.length} participantes{filtroCap || busqueda ? ' (filtrados)' : ''}</div>
+        <div style={{ fontSize: '13px', color: '#64748B' }}>
+          {cargando ? 'Cargando...' : `${filtrados.length} participantes${filtroCap || busqueda ? ' (filtrados)' : ''}`}
+        </div>
         <button onClick={() => setModal(true)}
           style={{ background: '#8131B0', color: 'white', border: 'none', padding: '8px 18px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>
           + Agregar participante
         </button>
       </div>
 
-      {/* Filtros */}
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
         <input
           type="text"
           placeholder="🔍 Buscar por nombre, correo o capacitación..."
           value={busqueda}
           onChange={e => setBusqueda(e.target.value)}
-          style={{ ...inp, width: '320px' }}
+          style={{ ...inp, width: '300px' }}
         />
         <select value={filtroCap} onChange={e => setFiltroCap(e.target.value)}
           style={{ ...inp, width: '320px' }}>
@@ -168,10 +174,9 @@ export default function Participantes({ onCambio }) {
         )}
       </div>
 
-      {/* Tabla */}
       <div style={{ background: 'white', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', overflow: 'hidden' }}>
         {cargando ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#94A3B8' }}>Cargando...</div>
+          <div style={{ padding: '40px', textAlign: 'center', color: '#94A3B8' }}>Cargando participantes...</div>
         ) : filtrados.length === 0 ? (
           <div style={{ padding: '50px', textAlign: 'center', color: '#94A3B8' }}>
             <div style={{ fontSize: '32px', marginBottom: '10px' }}>👥</div>
@@ -193,8 +198,8 @@ export default function Participantes({ onCambio }) {
                   <tr key={p.id} style={{ background: i % 2 === 0 ? 'white' : '#FAFAFA' }}>
                     <td style={{ padding: '10px 12px', fontWeight: '500', fontSize: '13px', whiteSpace: 'nowrap' }}>{getNombre(p)}</td>
                     <td style={{ padding: '10px 12px', fontSize: '12px', color: '#0072DA' }}>{getCorreo(p)}</td>
-                    <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{p.colaboradores?.gerencia || '—'}</td>
-                    <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{p.colaboradores?.puesto || '—'}</td>
+                    <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{getGerencia(p)}</td>
+                    <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{getPuesto(p)}</td>
                     <td style={{ padding: '10px 12px', fontSize: '12px', color: '#374151', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.capacitaciones?.nombre}</td>
                     <td style={{ padding: '10px 12px', fontSize: '13px', fontWeight: '600', color: '#0F9B72' }}>{p.horas || p.capacitaciones?.horas || 0}h</td>
                     <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>
@@ -213,7 +218,6 @@ export default function Participantes({ onCambio }) {
         )}
       </div>
 
-      {/* Modal agregar participante */}
       {modal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: 'white', borderRadius: '16px', width: '520px', maxWidth: '95vw', maxHeight: '90vh', overflow: 'auto' }}>
@@ -223,21 +227,15 @@ export default function Participantes({ onCambio }) {
                 style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#94A3B8' }}>✕</button>
             </div>
             <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-
               <div>
-                <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }}>
-                  Capacitación *
-                </label>
+                <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }}>Capacitación *</label>
                 <select value={capSeleccionada} onChange={e => setCapSeleccionada(e.target.value)} style={inp}>
                   <option value="">Seleccionar capacitación...</option>
                   {capacitaciones.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                 </select>
               </div>
-
               <div>
-                <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }}>
-                  Buscar colaborador por nombre o correo *
-                </label>
+                <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }}>Buscar colaborador *</label>
                 <input
                   type="text"
                   placeholder="Escribí el nombre o correo..."
@@ -246,18 +244,11 @@ export default function Participantes({ onCambio }) {
                   style={inp}
                 />
               </div>
-
               {resultados.length > 0 && (
                 <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
                   {resultados.map((c, i) => (
-                    <div key={c.id}
-                      onClick={() => agregar(c)}
-                      style={{
-                        padding: '10px 14px', cursor: 'pointer', fontSize: '13px',
-                        background: i % 2 === 0 ? 'white' : '#F8FAFC',
-                        borderBottom: i < resultados.length - 1 ? '1px solid #F1F5F9' : 'none',
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-                      }}>
+                    <div key={c.id} onClick={() => agregar(c)}
+                      style={{ padding: '10px 14px', cursor: 'pointer', fontSize: '13px', background: i % 2 === 0 ? 'white' : '#F8FAFC', borderBottom: i < resultados.length - 1 ? '1px solid #F1F5F9' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
                         <div style={{ fontWeight: '500', color: '#1E293B' }}>{c.nombre}</div>
                         <div style={{ fontSize: '11px', color: '#94A3B8' }}>{c.correo} · {c.gerencia}</div>
@@ -269,14 +260,10 @@ export default function Participantes({ onCambio }) {
                   ))}
                 </div>
               )}
-
               {busquedaColab && resultados.length === 0 && (
-                <div style={{ fontSize: '13px', color: '#94A3B8', textAlign: 'center', padding: '10px' }}>
-                  No se encontraron colaboradores
-                </div>
+                <div style={{ fontSize: '13px', color: '#94A3B8', textAlign: 'center', padding: '10px' }}>No se encontraron colaboradores</div>
               )}
             </div>
-
             <div style={{ padding: '16px 24px', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'flex-end' }}>
               <button onClick={() => { setModal(false); setBusquedaColab(''); setResultados([]) }}
                 style={{ padding: '8px 18px', border: '1px solid #E2E8F0', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', background: 'white' }}>
