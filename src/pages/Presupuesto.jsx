@@ -6,199 +6,311 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 )
 
-const VACIO = {
-  centro_gestor: '', posicion: '', importe: '',
-  cd: 'CR', texto: '', fecha: '', estado: 'Pendiente'
+const ANIOS = ['2026', '2025', '2024', '2023', '2022', '2021']
+const COLORS = {
+  azul: '#0072DA', morado: '#8131B0', amarillo: '#FFCF00',
+  rojo: '#DA2B1F', grafito: '#414042', fondo: '#F8FAFC', borde: '#E2E8F0'
 }
 
-export default function Presupuesto() {
-  const [lista, setLista] = useState([])
-  const [modal, setModal] = useState(false)
-  const [form, setForm] = useState(VACIO)
-  const [guardando, setGuardando] = useState(false)
-  const [exito, setExito] = useState('')
+export default function Presupuesto({ onCambio }) {
+  const [datos, setDatos] = useState([])
+  const [filtroAnio, setFiltroAnio] = useState('2026')
+  const [filtroGerencia, setFiltroGerencia] = useState('')
+  const [drillGerencia, setDrillGerencia] = useState(null)
   const [cargando, setCargando] = useState(true)
+  const [gerencias, setGerencias] = useState([])
 
-  const totalEjecutado = lista.filter(m => m.cd === 'CR').reduce((s, m) => s + Number(m.importe), 0)
-  const totalAbonos = lista.filter(m => m.cd === 'AB').reduce((s, m) => s + Number(m.importe), 0)
-  const saldo = totalAbonos - totalEjecutado
-
-  useEffect(() => { cargar() }, [])
+  useEffect(() => { cargar() }, [filtroAnio])
 
   async function cargar() {
     setCargando(true)
-    const { data } = await supabase
-      .from('presupuesto')
-      .select('*')
-      .order('created_at', { ascending: false })
-    if (data) setLista(data)
+
+    // Obtener IDs de capacitaciones del año
+    let capIds = null
+    if (filtroAnio) {
+      const { data: capsAnio } = await supabase
+        .from('capacitaciones')
+        .select('id')
+        .gte('fecha_inicio', `${filtroAnio}-01-01`)
+        .lte('fecha_inicio', `${filtroAnio}-12-31`)
+
+      if (!capsAnio || capsAnio.length === 0) {
+        setDatos([])
+        setCargando(false)
+        return
+      }
+      capIds = capsAnio.map(c => c.id)
+    }
+
+    // Obtener participantes con costo y colaborador
+    let q = supabase
+      .from('participantes')
+      .select('costo, correo, colaborador_id, colaboradores(gerencia, departamento)')
+      .gt('costo', 0)
+
+    if (capIds) q = q.in('capacitacion_id', capIds)
+
+    const { data: pData } = await q
+
+    // Obtener colaboradores por correo para los que no tienen colaborador_id
+    const { data: colsData } = await supabase
+      .from('colaboradores')
+      .select('correo, gerencia, departamento')
+
+    const colByCorreo = {}
+    colsData?.forEach(c => {
+      if (c.correo) colByCorreo[c.correo.toLowerCase().trim()] = c
+    })
+
+    // Enriquecer con gerencia
+    const enriquecidos = (pData || []).map(p => {
+      const ger = p.colaboradores?.gerencia ||
+        colByCorreo[p.correo?.toLowerCase().trim()]?.gerencia ||
+        'Sin gerencia'
+      const dep = p.colaboradores?.departamento ||
+        colByCorreo[p.correo?.toLowerCase().trim()]?.departamento ||
+        'Sin departamento'
+      return { ...p, _gerencia: ger, _departamento: dep }
+    })
+
+    setDatos(enriquecidos)
+
+    // Extraer gerencias únicas
+    const gersUnicas = [...new Set(enriquecidos.map(p => p._gerencia))].sort()
+    setGerencias(gersUnicas)
     setCargando(false)
   }
 
-  function cambiar(e) {
-    setForm({ ...form, [e.target.name]: e.target.value })
-  }
+  // Filtrar por gerencia seleccionada
+  const datosFiltrados = filtroGerencia
+    ? datos.filter(p => p._gerencia === filtroGerencia)
+    : datos
 
-  async function guardar() {
-    if (!form.centro_gestor || !form.posicion || !form.importe || !form.cd || !form.texto) {
-      alert('Completá los campos obligatorios (*)'); return
-    }
-    setGuardando(true)
-    const { error } = await supabase.from('presupuesto').insert([{
-      ...form,
-      importe: Number(form.importe)
-    }])
-    if (!error) {
-      setExito('✅ Movimiento registrado correctamente')
-      setModal(false)
-      setForm(VACIO)
-      cargar()
-      setTimeout(() => setExito(''), 3000)
-    } else {
-      alert('Error: ' + error.message)
-    }
-    setGuardando(false)
-  }
+  // Total ejecutado
+  const totalEjecutado = datosFiltrados.reduce((s, p) => s + Number(p.costo || 0), 0)
 
-  const inp = { height: '36px', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0 10px', fontSize: '13px', width: '100%', outline: 'none', background: 'white' }
-  const lbl = { fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }
+  // Agrupar por gerencia
+  const porGerencia = {}
+  datos.forEach(p => {
+    const ger = p._gerencia
+    const dep = p._departamento
+    if (!porGerencia[ger]) porGerencia[ger] = { total: 0, departamentos: {} }
+    porGerencia[ger].total += Number(p.costo || 0)
+    if (!porGerencia[ger].departamentos[dep]) porGerencia[ger].departamentos[dep] = 0
+    porGerencia[ger].departamentos[dep] += Number(p.costo || 0)
+  })
 
-  return (
-    <div>
-      {exito && (
-        <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '8px', padding: '12px 16px', marginBottom: '16px', fontSize: '13px', color: '#166534' }}>
-          {exito}
-        </div>
-      )}
+  const gerenciasArray = Object.entries(porGerencia)
+    .map(([nombre, d]) => ({
+      nombre: nombre.replace('Gerencia De ', '').replace('Gerencia ', ''),
+      nombreCompleto: nombre,
+      total: d.total,
+      departamentos: Object.entries(d.departamentos)
+        .map(([dep, total]) => ({ nombre: dep, total }))
+        .sort((a, b) => b.total - a.total)
+    }))
+    .sort((a, b) => b.total - a.total)
 
-      {/* KPIs */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '24px' }}>
-        {[
-          { label: 'Total ejecutado (CR)', valor: totalEjecutado, color: '#DC2626', bg: '#FEF2F2' },
-          { label: 'Total abonos (AB)',    valor: totalAbonos,    color: '#0F9B72', bg: '#F0FDF4' },
-          { label: 'Saldo neto',           valor: saldo,          color: '#5B4EE8', bg: '#EEF0FF' },
-        ].map(k => (
-          <div key={k.label} style={{ background: k.bg, borderRadius: '12px', padding: '20px', border: `1px solid ${k.color}22` }}>
-            <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '8px' }}>{k.label}</div>
-            <div style={{ fontSize: '24px', fontWeight: '600', color: k.color }}>
-              ₡{Math.abs(k.valor).toLocaleString()}
+  // Drill: departamentos de la gerencia seleccionada
+  const drillDatos = drillGerencia
+    ? (porGerencia[drillGerencia.nombreCompleto]?.departamentos || {})
+    : null
+
+  const drillArray = drillDatos
+    ? Object.entries(drillDatos)
+        .map(([dep, total]) => ({ nombre: dep, total }))
+        .sort((a, b) => b.total - a.total)
+    : []
+
+  function GraficaBarras({ datos, color, sufijo = '' }) {
+    if (!datos || datos.length === 0) return <div style={{ color: '#94A3B8', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Sin datos</div>
+    const max = Math.max(...datos.map(d => d.total), 1)
+    return (
+      <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+        {datos.map((d, i) => (
+          <div key={i} style={{ marginBottom: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: COLORS.grafito, marginBottom: '3px' }}>
+              <span style={{ maxWidth: '65%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.nombre}</span>
+              <span style={{ fontWeight: '600', color: color }}>₡{Math.round(d.total).toLocaleString()}</span>
+            </div>
+            <div style={{ background: '#E2E8F0', borderRadius: '4px', height: '18px', overflow: 'hidden' }}>
+              <div style={{ background: color, height: '100%', width: `${(d.total / max) * 100}%`, borderRadius: '4px', transition: 'width 0.4s ease' }} />
             </div>
           </div>
         ))}
       </div>
+    )
+  }
 
-      {/* Encabezado */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <div style={{ fontSize: '13px', color: '#64748B' }}>{lista.length} movimientos registrados</div>
-        <button onClick={() => { setModal(true); setForm(VACIO) }}
-          style={{ background: '#5B4EE8', color: 'white', border: 'none', padding: '8px 18px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>
-          + Nuevo movimiento
-        </button>
+  const inp = { height: '36px', border: `1px solid ${COLORS.borde}`, borderRadius: '8px', padding: '0 10px', fontSize: '13px', outline: 'none', background: 'white' }
+
+  return (
+    <div>
+      {/* Filtros */}
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <select value={filtroAnio} onChange={e => { setFiltroAnio(e.target.value); setFiltroGerencia(''); setDrillGerencia(null) }}
+          style={{ ...inp, width: '130px' }}>
+          <option value="">Todos los años</option>
+          {ANIOS.map(a => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <select value={filtroGerencia} onChange={e => { setFiltroGerencia(e.target.value); setDrillGerencia(null) }}
+          style={{ ...inp, width: '280px' }}>
+          <option value="">Todas las gerencias</option>
+          {gerencias.map(g => <option key={g} value={g}>{g}</option>)}
+        </select>
+        {(filtroGerencia) && (
+          <button onClick={() => { setFiltroGerencia(''); setDrillGerencia(null) }}
+            style={{ ...inp, width: 'auto', padding: '0 14px', cursor: 'pointer', color: '#64748B' }}>
+            ✕ Limpiar
+          </button>
+        )}
       </div>
 
-      {/* Tabla */}
+      {/* KPI principal */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '24px' }}>
+        <div style={{ background: 'white', borderRadius: '12px', padding: '20px', borderLeft: `4px solid ${COLORS.rojo}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+          <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '6px' }}>
+            💰 Total ejecutado {filtroAnio || 'histórico'}{filtroGerencia ? ` · ${filtroGerencia.replace('Gerencia ', '')}` : ''}
+          </div>
+          <div style={{ fontSize: '28px', fontWeight: '700', color: COLORS.rojo }}>
+            {cargando ? '...' : `₡${Math.round(totalEjecutado).toLocaleString()}`}
+          </div>
+          <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '4px' }}>
+            {cargando ? '' : `${datosFiltrados.length} registros con costo`}
+          </div>
+        </div>
+
+        <div style={{ background: 'white', borderRadius: '12px', padding: '20px', borderLeft: `4px solid ${COLORS.azul}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+          <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '6px' }}>🏢 Gerencias con gasto</div>
+          <div style={{ fontSize: '28px', fontWeight: '700', color: COLORS.azul }}>
+            {cargando ? '...' : gerenciasArray.filter(g => !filtroGerencia || g.nombreCompleto === filtroGerencia).length}
+          </div>
+          <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '4px' }}>unidades organizacionales</div>
+        </div>
+
+        <div style={{ background: 'white', borderRadius: '12px', padding: '20px', borderLeft: `4px solid ${COLORS.morado}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+          <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '6px' }}>📊 Costo promedio por participante</div>
+          <div style={{ fontSize: '28px', fontWeight: '700', color: COLORS.morado }}>
+            {cargando ? '...' : datosFiltrados.length > 0 ? `₡${Math.round(totalEjecutado / datosFiltrados.length).toLocaleString()}` : '₡0'}
+          </div>
+          <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '4px' }}>promedio por participación</div>
+        </div>
+      </div>
+
+      {/* Gráfica de barras por gerencia */}
+      <div style={{ display: 'grid', gridTemplateColumns: drillGerencia ? '1fr 1fr' : '1fr', gap: '16px', marginBottom: '24px' }}>
+
+        {/* Panel gerencias */}
+        <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+          <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B', marginBottom: '16px' }}>
+            🏢 Gasto por Gerencia
+          </div>
+          {cargando ? (
+            <div style={{ color: '#94A3B8', textAlign: 'center', padding: '20px' }}>Cargando...</div>
+          ) : (
+            <>
+              <GraficaBarras
+                datos={gerenciasArray.filter(g => !filtroGerencia || g.nombreCompleto === filtroGerencia)}
+                color={COLORS.rojo}
+              />
+              {!filtroGerencia && gerenciasArray.length > 0 && (
+                <div style={{ marginTop: '12px', borderTop: `1px solid ${COLORS.borde}`, paddingTop: '12px' }}>
+                  <div style={{ fontSize: '11px', color: '#94A3B8', marginBottom: '8px' }}>Ver departamentos:</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {gerenciasArray.slice(0, 8).map(g => (
+                      <button key={g.nombre}
+                        onClick={() => setDrillGerencia(drillGerencia?.nombre === g.nombre ? null : g)}
+                        style={{
+                          padding: '4px 10px', borderRadius: '20px', border: 'none', cursor: 'pointer', fontSize: '11px',
+                          background: drillGerencia?.nombre === g.nombre ? COLORS.morado : '#EEF0FF',
+                          color: drillGerencia?.nombre === g.nombre ? 'white' : COLORS.morado,
+                          fontWeight: '500'
+                        }}>
+                        {g.nombre}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Panel departamentos (drill) */}
+        {drillGerencia && (
+          <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div>
+                <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>📂 {drillGerencia.nombre}</div>
+                <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '2px' }}>Desglose por departamento</div>
+              </div>
+              <button onClick={() => setDrillGerencia(null)}
+                style={{ background: '#F1F5F9', border: 'none', padding: '5px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '11px', color: '#64748B' }}>
+                ✕ Cerrar
+              </button>
+            </div>
+            <GraficaBarras datos={drillArray} color={COLORS.morado} />
+          </div>
+        )}
+      </div>
+
+      {/* Tabla detallada por gerencia */}
       <div style={{ background: 'white', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', overflow: 'hidden' }}>
+        <div style={{ padding: '16px 20px', borderBottom: `1px solid ${COLORS.borde}`, fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>
+          📋 Resumen por Gerencia
+        </div>
         {cargando ? (
           <div style={{ padding: '40px', textAlign: 'center', color: '#94A3B8' }}>Cargando...</div>
-        ) : lista.length === 0 ? (
-          <div style={{ padding: '50px', textAlign: 'center', color: '#94A3B8' }}>
-            <div style={{ fontSize: '32px', marginBottom: '10px' }}>💰</div>
-            <div style={{ fontWeight: '500' }}>No hay movimientos aún</div>
-          </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: '#F8FAFC' }}>
-                {['Centro Gestor','Posición','CD','Texto','Importe','Fecha','Estado'].map(h => (
-                  <th key={h} style={{ padding: '10px 12px', fontSize: '11px', fontWeight: '600', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid #E2E8F0', textAlign: 'left' }}>{h}</th>
+                {['Gerencia', 'Participaciones con costo', 'Total ejecutado', '% del total'].map(h => (
+                  <th key={h} style={{ padding: '10px 16px', fontSize: '11px', fontWeight: '600', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: `1px solid ${COLORS.borde}`, textAlign: 'left' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {lista.map((m, i) => (
-                <tr key={m.id} style={{ background: i % 2 === 0 ? 'white' : '#FAFAFA' }}>
-                  <td style={{ padding: '10px 12px', fontSize: '13px', fontWeight: '500' }}>{m.centro_gestor}</td>
-                  <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{m.posicion}</td>
-                  <td style={{ padding: '10px 12px' }}>
-                    <span style={{ background: m.cd === 'CR' ? '#FEE2E2' : '#D1FAE5', color: m.cd === 'CR' ? '#991B1B' : '#065F46', padding: '2px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: '600' }}>
-                      {m.cd}
-                    </span>
-                  </td>
-                  <td style={{ padding: '10px 12px', fontSize: '13px', color: '#374151' }}>{m.texto}</td>
-                  <td style={{ padding: '10px 12px', fontSize: '13px', fontWeight: '600', color: m.cd === 'CR' ? '#DC2626' : '#0F9B72' }}>
-                    {m.cd === 'CR' ? '-' : '+'}₡{Number(m.importe).toLocaleString()}
-                  </td>
-                  <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{m.fecha}</td>
-                  <td style={{ padding: '10px 12px' }}>
-                    <span style={{ background: m.estado === 'Ejecutado' ? '#D1FAE5' : '#FEF3C7', color: m.estado === 'Ejecutado' ? '#065F46' : '#92400E', padding: '2px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: '500' }}>
-                      {m.estado}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {gerenciasArray
+                .filter(g => !filtroGerencia || g.nombreCompleto === filtroGerencia)
+                .map((g, i) => {
+                  const totalGlobal = gerenciasArray.reduce((s, x) => s + x.total, 0)
+                  const pct = totalGlobal > 0 ? ((g.total / totalGlobal) * 100).toFixed(1) : '0'
+                  const count = datos.filter(p => p._gerencia === g.nombreCompleto).length
+                  return (
+                    <tr key={g.nombre} style={{ background: i % 2 === 0 ? 'white' : '#FAFAFA' }}
+                      onClick={() => setDrillGerencia(drillGerencia?.nombre === g.nombre ? null : g)}
+                      style={{ background: i % 2 === 0 ? 'white' : '#FAFAFA', cursor: 'pointer' }}>
+                      <td style={{ padding: '12px 16px', fontWeight: '500', fontSize: '13px' }}>{g.nombreCompleto}</td>
+                      <td style={{ padding: '12px 16px', fontSize: '13px', color: '#64748B' }}>{count}</td>
+                      <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: '600', color: COLORS.rojo }}>
+                        ₡{Math.round(g.total).toLocaleString()}
+                      </td>
+                      <td style={{ padding: '12px 16px', fontSize: '13px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{ background: '#E2E8F0', borderRadius: '4px', height: '6px', width: '80px', overflow: 'hidden' }}>
+                            <div style={{ background: COLORS.rojo, height: '100%', width: `${pct}%`, borderRadius: '4px' }} />
+                          </div>
+                          <span style={{ color: '#64748B', fontSize: '12px' }}>{pct}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
             </tbody>
+            <tfoot>
+              <tr style={{ background: '#F8FAFC', borderTop: `2px solid ${COLORS.borde}` }}>
+                <td style={{ padding: '12px 16px', fontWeight: '700', fontSize: '13px' }}>TOTAL</td>
+                <td style={{ padding: '12px 16px', fontWeight: '600', fontSize: '13px' }}>{datosFiltrados.length}</td>
+                <td style={{ padding: '12px 16px', fontWeight: '700', fontSize: '14px', color: COLORS.rojo }}>
+                  ₡{Math.round(totalEjecutado).toLocaleString()}
+                </td>
+                <td style={{ padding: '12px 16px', fontWeight: '600', fontSize: '13px', color: '#64748B' }}>100%</td>
+              </tr>
+            </tfoot>
           </table>
         )}
       </div>
-
-      {/* Modal */}
-      {modal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'white', borderRadius: '16px', width: '500px', maxWidth: '95vw' }}>
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontSize: '16px', fontWeight: '600' }}>Nuevo movimiento presupuestario</div>
-              <button onClick={() => setModal(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#94A3B8' }}>✕</button>
-            </div>
-            <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={lbl}>Centro Gestor *</label>
-                <input name="centro_gestor" value={form.centro_gestor} onChange={cambiar} style={inp} placeholder="Ej: 1001 · Tecnología" />
-              </div>
-              <div>
-                <label style={lbl}>Posición Presupuestaria *</label>
-                <input name="posicion" value={form.posicion} onChange={cambiar} style={inp} placeholder="Ej: C-450001" />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                <div>
-                  <label style={lbl}>Importe (₡) *</label>
-                  <input name="importe" type="number" value={form.importe} onChange={cambiar} style={inp} placeholder="0" />
-                </div>
-                <div>
-                  <label style={lbl}>CD *</label>
-                  <select name="cd" value={form.cd} onChange={cambiar} style={inp}>
-                    <option value="CR">CR · Crédito</option>
-                    <option value="AB">AB · Abono</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label style={lbl}>Texto *</label>
-                <input name="texto" value={form.texto} onChange={cambiar} style={inp} placeholder="Descripción del movimiento" />
-              </div>
-              <div>
-                <label style={lbl}>Fecha</label>
-                <input name="fecha" type="date" value={form.fecha} onChange={cambiar} style={inp} />
-              </div>
-              <div>
-                <label style={lbl}>Estado</label>
-                <select name="estado" value={form.estado} onChange={cambiar} style={inp}>
-                  <option value="Pendiente">Pendiente</option>
-                  <option value="Ejecutado">Ejecutado</option>
-                </select>
-              </div>
-            </div>
-            <div style={{ padding: '16px 24px', borderTop: '1px solid #E2E8F0', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-              <button onClick={() => setModal(false)} style={{ padding: '8px 18px', border: '1px solid #E2E8F0', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', background: 'white' }}>
-                Cancelar
-              </button>
-              <button onClick={guardar} disabled={guardando}
-                style={{ padding: '8px 20px', background: '#5B4EE8', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>
-                {guardando ? 'Guardando...' : '💾 Guardar'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
