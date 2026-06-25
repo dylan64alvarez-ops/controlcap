@@ -74,127 +74,120 @@ export default function App() {
     const totalPre = preData?.reduce((s, r) => s + Number(r.importe), 0) || 0
 
     setStats({ capacitaciones, colaboradores, participantes, horas, presupuesto: totalPre })
-
-    // Cargar datos de gráficas
     await cargarGraficas()
     setCargando(false)
   }
 
   async function cargarGraficas() {
-    const anioFiltro = anio !== 'todos' ? parseInt(anio) : null
+    // Obtener colaboradores con gerencia/departamento/género
+    const { data: colsData } = await supabase
+      .from('colaboradores')
+      .select('id, gerencia, departamento, genero')
 
-    // Gráfica 1: Participaciones por gerencia
-    let qGerencia = supabase
+    if (!colsData) return
+
+    const colMap = {}
+    colsData.forEach(c => { colMap[c.id] = c })
+
+    // Obtener participantes con capacitacion info
+    let pQuery = supabase
       .from('participantes')
-      .select('colaborador_id, colaboradores(gerencia), capacitaciones(fecha_inicio)')
+      .select('colaborador_id, horas, capacitacion_id, capacitaciones(fecha_inicio)')
       .not('colaborador_id', 'is', null)
 
-    // Query directa con SQL para gerencia
-    const { data: gerData } = await supabase.rpc('stats_por_gerencia', { anio_filtro: anioFiltro }).catch(() => ({ data: null }))
+    const { data: pData } = await pQuery
+    if (!pData) return
 
-    if (!gerData) {
-      // Fallback: query manual
-      let qP = supabase
-        .from('participantes')
-        .select(`
-          colaboradores!inner(gerencia, departamento, genero),
-          capacitaciones!inner(fecha_inicio, horas)
-        `)
-        .not('colaborador_id', 'is', null)
+    const anioFiltro = anio !== 'todos' ? parseInt(anio) : null
 
-      const { data: pData } = await qP
-
-      if (pData) {
-        // Filtrar por año si aplica
-        const filtrado = anioFiltro
-          ? pData.filter(p => {
-              const fecha = p.capacitaciones?.fecha_inicio
-              return fecha && new Date(fecha).getFullYear() === anioFiltro
-            })
-          : pData
-
-        // Agrupar por gerencia
-        const gerMap = {}
-        const genMap = { FEMENINO: 0, MASCULINO: 0, OTRO: 0 }
-        const mesMap = {}
-
-        filtrado.forEach(p => {
-          const ger = p.colaboradores?.gerencia || 'Sin gerencia'
-          const dep = p.colaboradores?.departamento || 'Sin departamento'
-          const gen = p.colaboradores?.genero || 'OTRO'
+    const filtrado = anioFiltro
+      ? pData.filter(p => {
           const fecha = p.capacitaciones?.fecha_inicio
-          const mes = fecha ? new Date(fecha).getMonth() + 1 : null
-          const hrs = Number(p.capacitaciones?.horas || 0)
-
-          if (!gerMap[ger]) gerMap[ger] = { total: 0, departamentos: {} }
-          gerMap[ger].total++
-          if (!gerMap[ger].departamentos[dep]) gerMap[ger].departamentos[dep] = 0
-          gerMap[ger].departamentos[dep]++
-
-          if (gen === 'FEMENINO') genMap.FEMENINO++
-          else if (gen === 'MASCULINO') genMap.MASCULINO++
-          else genMap.OTRO++
-
-          if (mes) {
-            if (!mesMap[mes]) mesMap[mes] = { participaciones: 0, horas: 0 }
-            mesMap[mes].participaciones++
-            mesMap[mes].horas += hrs
-          }
+          return fecha && new Date(fecha).getFullYear() === anioFiltro
         })
+      : pData
 
-        const gerencias = Object.entries(gerMap)
-          .map(([nombre, data]) => ({
-            nombre: nombre.replace('Gerencia ', 'Ger. '),
-            total: data.total,
-            departamentos: Object.entries(data.departamentos)
-              .map(([dep, cnt]) => ({ nombre: dep, total: cnt }))
-              .sort((a, b) => b.total - a.total)
-          }))
-          .sort((a, b) => b.total - a.total)
+    const gerMap = {}
+    const genMap = { FEMENINO: 0, MASCULINO: 0, OTRO: 0 }
+    const mesMap = {}
 
-        const totalGen = genMap.FEMENINO + genMap.MASCULINO + genMap.OTRO
-        const generos = [
-          { label: 'Femenino', valor: genMap.FEMENINO, pct: totalGen ? Math.round(genMap.FEMENINO / totalGen * 100) : 0, color: COLORS.morado },
-          { label: 'Masculino', valor: genMap.MASCULINO, pct: totalGen ? Math.round(genMap.MASCULINO / totalGen * 100) : 0, color: COLORS.azul },
-          { label: 'Otro', valor: genMap.OTRO, pct: totalGen ? Math.round(genMap.OTRO / totalGen * 100) : 0, color: COLORS.grafito },
-        ]
+    filtrado.forEach(p => {
+      const col = colMap[p.colaborador_id]
+      if (!col) return
 
-        const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Set','Oct','Nov','Dic']
-        const mensual = meses.map((label, i) => ({
-          label,
-          participaciones: mesMap[i + 1]?.participaciones || 0,
-          horas: mesMap[i + 1]?.horas || 0,
-        }))
+      const ger = col.gerencia || 'Sin gerencia'
+      const dep = col.departamento || 'Sin departamento'
+      const gen = (col.genero || '').toUpperCase()
+      const fecha = p.capacitaciones?.fecha_inicio
+      const mes = fecha ? new Date(fecha).getMonth() + 1 : null
+      const hrs = Number(p.horas || 0)
 
-        setGraficas({ gerencias, generos, mensual })
-        setGerenciaSeleccionada(null)
+      // Gerencia
+      if (!gerMap[ger]) gerMap[ger] = { total: 0, departamentos: {} }
+      gerMap[ger].total++
+      if (!gerMap[ger].departamentos[dep]) gerMap[ger].departamentos[dep] = 0
+      gerMap[ger].departamentos[dep]++
+
+      // Género
+      if (gen === 'FEMENINO') genMap.FEMENINO++
+      else if (gen === 'MASCULINO') genMap.MASCULINO++
+      else genMap.OTRO++
+
+      // Mensual
+      if (mes) {
+        if (!mesMap[mes]) mesMap[mes] = { participaciones: 0, horas: 0 }
+        mesMap[mes].participaciones++
+        mesMap[mes].horas += hrs
       }
-    }
+    })
+
+    const gerencias = Object.entries(gerMap)
+      .map(([nombre, data]) => ({
+        nombre: nombre.replace('Gerencia De ', '').replace('Gerencia ', ''),
+        nombreCompleto: nombre,
+        total: data.total,
+        departamentos: Object.entries(data.departamentos)
+          .map(([dep, cnt]) => ({ nombre: dep, total: cnt }))
+          .sort((a, b) => b.total - a.total)
+      }))
+      .sort((a, b) => b.total - a.total)
+
+    const totalGen = genMap.FEMENINO + genMap.MASCULINO + genMap.OTRO
+    const generos = [
+      { label: 'Femenino',  valor: genMap.FEMENINO,  pct: totalGen ? Math.round(genMap.FEMENINO / totalGen * 100) : 0,  color: COLORS.morado },
+      { label: 'Masculino', valor: genMap.MASCULINO, pct: totalGen ? Math.round(genMap.MASCULINO / totalGen * 100) : 0, color: COLORS.azul },
+      { label: 'Otro',      valor: genMap.OTRO,      pct: totalGen ? Math.round(genMap.OTRO / totalGen * 100) : 0,      color: COLORS.grafito },
+    ]
+
+    const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Set','Oct','Nov','Dic']
+    const mensual = meses.map((label, i) => ({
+      label,
+      participaciones: mesMap[i + 1]?.participaciones || 0,
+      horas: mesMap[i + 1]?.horas || 0,
+    }))
+
+    setGraficas({ gerencias, generos, mensual })
+    setGerenciaSeleccionada(null)
   }
 
-  // Componente gráfica de barras
-  function GraficaBarras({ datos, colorBarra, titulo, campoValor = 'total', labelKey = 'nombre' }) {
+  function GraficaBarras({ datos, colorBarra, campoValor = 'total', labelKey = 'nombre', onBarClick }) {
     if (!datos || datos.length === 0) return <div style={{ color: '#94A3B8', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Sin datos</div>
-    const maxVal = Math.max(...datos.map(d => d[campoValor]))
+    const maxVal = Math.max(...datos.map(d => d[campoValor]), 1)
     return (
       <div>
         {datos.map((d, i) => (
-          <div key={i} style={{ marginBottom: '10px' }}>
+          <div key={i} style={{ marginBottom: '10px', cursor: onBarClick ? 'pointer' : 'default' }} onClick={() => onBarClick && onBarClick(d)}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: COLORS.grafito, marginBottom: '3px' }}>
-              <span style={{ maxWidth: '70%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d[labelKey]}</span>
+              <span style={{ maxWidth: '75%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d[labelKey]}</span>
               <span style={{ fontWeight: '600', color: colorBarra }}>{d[campoValor]}</span>
             </div>
-            <div
-              onClick={() => d.departamentos && setGerenciaSeleccionada(gerenciaSeleccionada?.nombre === d.nombre ? null : d)}
-              style={{ background: '#E2E8F0', borderRadius: '4px', height: '20px', cursor: d.departamentos ? 'pointer' : 'default', overflow: 'hidden' }}
-            >
+            <div style={{ background: '#E2E8F0', borderRadius: '4px', height: '18px', overflow: 'hidden' }}>
               <div style={{
                 background: colorBarra,
                 height: '100%',
-                width: `${maxVal > 0 ? (d[campoValor] / maxVal * 100) : 0}%`,
+                width: `${(d[campoValor] / maxVal) * 100}%`,
                 borderRadius: '4px',
-                transition: 'width 0.5s ease',
-                opacity: gerenciaSeleccionada && gerenciaSeleccionada.nombre !== d.nombre ? 0.4 : 1
+                transition: 'width 0.4s ease',
               }} />
             </div>
           </div>
@@ -203,15 +196,13 @@ export default function App() {
     )
   }
 
-  // Componente donut
   function GraficaDonut({ datos }) {
     if (!datos || datos.length === 0) return null
     const total = datos.reduce((s, d) => s + d.valor, 0)
     if (total === 0) return <div style={{ color: '#94A3B8', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Sin datos</div>
 
     let acumulado = 0
-    const radio = 60
-    const cx = 80, cy = 80
+    const radio = 55, cx = 70, cy = 70
     const segmentos = datos.filter(d => d.valor > 0).map(d => {
       const inicio = acumulado
       acumulado += (d.valor / total) * 360
@@ -231,22 +222,22 @@ export default function App() {
     }
 
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-        <svg width="160" height="160">
+      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <svg width="140" height="140" style={{ flexShrink: 0 }}>
           {segmentos.map((s, i) => (
             <path key={i} d={arcPath(s.inicio, s.fin)} fill={s.color} stroke="white" strokeWidth="2" />
           ))}
-          <circle cx={cx} cy={cy} r="35" fill="white" />
-          <text x={cx} y={cy - 5} textAnchor="middle" fontSize="14" fontWeight="bold" fill={COLORS.grafito}>{total}</text>
-          <text x={cx} y={cy + 12} textAnchor="middle" fontSize="9" fill="#94A3B8">total</text>
+          <circle cx={cx} cy={cy} r="32" fill="white" />
+          <text x={cx} y={cy - 4} textAnchor="middle" fontSize="13" fontWeight="bold" fill={COLORS.grafito}>{total}</text>
+          <text x={cx} y={cy + 11} textAnchor="middle" fontSize="9" fill="#94A3B8">total</text>
         </svg>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {datos.map((d, i) => (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: d.color, flexShrink: 0 }} />
+              <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: d.color, flexShrink: 0 }} />
               <div>
                 <div style={{ fontSize: '12px', color: COLORS.grafito, fontWeight: '500' }}>{d.label}</div>
-                <div style={{ fontSize: '11px', color: '#94A3B8' }}>{d.valor} ({d.pct}%)</div>
+                <div style={{ fontSize: '11px', color: '#94A3B8' }}>{d.valor} · {d.pct}%</div>
               </div>
             </div>
           ))}
@@ -255,21 +246,20 @@ export default function App() {
     )
   }
 
-  // Componente tendencia mensual
   function GraficaTendencia({ datos }) {
-    if (!datos || datos.every(d => d.participaciones === 0)) return <div style={{ color: '#94A3B8', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Sin datos</div>
+    if (!datos || datos.every(d => d.participaciones === 0)) return <div style={{ color: '#94A3B8', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Sin datos para el período seleccionado</div>
     const maxP = Math.max(...datos.map(d => d.participaciones), 1)
     const maxH = Math.max(...datos.map(d => d.horas), 1)
-    const W = 480, H = 120, pad = 30
+    const W = 520, H = 130, padL = 10, padR = 10, padT = 10, padB = 25
 
     const puntosP = datos.map((d, i) => ({
-      x: pad + (i / (datos.length - 1)) * (W - pad * 2),
-      y: H - pad - (d.participaciones / maxP) * (H - pad * 2),
+      x: padL + (i / (datos.length - 1)) * (W - padL - padR),
+      y: padT + (1 - d.participaciones / maxP) * (H - padT - padB),
       val: d.participaciones
     }))
     const puntosH = datos.map((d, i) => ({
-      x: pad + (i / (datos.length - 1)) * (W - pad * 2),
-      y: H - pad - (d.horas / maxH) * (H - pad * 2),
+      x: padL + (i / (datos.length - 1)) * (W - padL - padR),
+      y: padT + (1 - d.horas / maxH) * (H - padT - padB),
       val: d.horas
     }))
 
@@ -278,25 +268,23 @@ export default function App() {
 
     return (
       <div>
-        <svg width="100%" viewBox={`0 0 ${W} ${H + 20}`}>
+        <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ overflow: 'visible' }}>
           {datos.map((d, i) => {
-            const x = pad + (i / (datos.length - 1)) * (W - pad * 2)
-            return (
-              <text key={i} x={x} y={H + 15} textAnchor="middle" fontSize="9" fill="#94A3B8">{d.label}</text>
-            )
+            const x = padL + (i / (datos.length - 1)) * (W - padL - padR)
+            return <text key={i} x={x} y={H - 5} textAnchor="middle" fontSize="10" fill="#94A3B8">{d.label}</text>
           })}
           <path d={lineaP} fill="none" stroke={COLORS.azul} strokeWidth="2.5" strokeLinejoin="round" />
-          <path d={lineaH} fill="none" stroke={COLORS.morado} strokeWidth="2.5" strokeLinejoin="round" strokeDasharray="5,3" />
-          {puntosP.map((p, i) => p.val > 0 && <circle key={i} cx={p.x} cy={p.y} r="3.5" fill={COLORS.azul} />)}
-          {puntosH.map((p, i) => p.val > 0 && <circle key={i} cx={p.x} cy={p.y} r="3.5" fill={COLORS.morado} />)}
+          <path d={lineaH} fill="none" stroke={COLORS.morado} strokeWidth="2.5" strokeLinejoin="round" strokeDasharray="6,3" />
+          {puntosP.map((p, i) => p.val > 0 && <circle key={i} cx={p.x} cy={p.y} r="4" fill="white" stroke={COLORS.azul} strokeWidth="2" />)}
+          {puntosH.map((p, i) => p.val > 0 && <circle key={i} cx={p.x} cy={p.y} r="4" fill="white" stroke={COLORS.morado} strokeWidth="2" />)}
         </svg>
-        <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', marginTop: '4px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <div style={{ width: '20px', height: '3px', background: COLORS.azul, borderRadius: '2px' }} />
+        <div style={{ display: 'flex', gap: '20px', justifyContent: 'center', marginTop: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ width: '24px', height: '3px', background: COLORS.azul, borderRadius: '2px' }} />
             <span style={{ fontSize: '11px', color: '#64748B' }}>Participaciones</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <div style={{ width: '20px', height: '3px', background: COLORS.morado, borderRadius: '2px', borderTop: '2px dashed ' + COLORS.morado }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ width: '24px', height: '2px', background: COLORS.morado, borderRadius: '2px', borderTop: `2px dashed ${COLORS.morado}` }} />
             <span style={{ fontSize: '11px', color: '#64748B' }}>Horas</span>
           </div>
         </div>
@@ -331,12 +319,10 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: 'Arial, sans-serif' }}>
-
-      {/* Menú lateral */}
       <div style={{ width: '230px', background: '#1B2560', color: 'white', padding: '20px 0', flexShrink: 0, overflowY: 'auto' }}>
         <div style={{ padding: '0 20px 20px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
           <div style={{ fontSize: '18px', fontWeight: 'bold' }}>
-            <span style={{ color: '#FFCF00' }}>Control</span>Cap
+            <span style={{ color: COLORS.amarillo }}>Control</span>Cap
           </div>
           <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginTop: '2px' }}>Universidad Corporativa</div>
         </div>
@@ -355,10 +341,7 @@ export default function App() {
         </nav>
       </div>
 
-      {/* Contenido */}
       <div style={{ flex: 1, background: COLORS.fondo, overflow: 'auto' }}>
-
-        {/* Header */}
         <div style={{ background: 'white', padding: '15px 30px', borderBottom: `1px solid ${COLORS.borde}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontSize: '18px', fontWeight: '500' }}>
             {menuItems.find(m => m.id === pagina)?.label.split(' ').slice(1).join(' ') || pagina}
@@ -388,9 +371,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Páginas */}
         <div style={{ padding: '30px' }}>
-
           {pagina === 'dashboard' && (
             <div>
               <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -401,14 +382,13 @@ export default function App() {
                 {cargando && <span style={{ fontSize: '12px', color: '#94A3B8' }}>⏳ Calculando...</span>}
               </div>
 
-              {/* KPIs */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '14px', marginBottom: '24px' }}>
                 {[
                   { label: 'Capacitaciones',  valor: stats.capacitaciones.toLocaleString(), color: COLORS.morado, icon: '🎓', sub: 'únicas por nombre',  dest: 'capacitaciones' },
                   { label: 'Colaboradores',    valor: stats.colaboradores.toLocaleString(),  color: COLORS.amarillo, icon: '📋', sub: 'únicos por correo', dest: 'colaboradores' },
                   { label: 'Participaciones',  valor: stats.participantes.toLocaleString(),  color: COLORS.azul,   icon: '👥', sub: 'registros totales',  dest: 'participantes' },
                   { label: 'Horas impartidas', valor: stats.horas.toLocaleString(),          color: COLORS.morado, icon: '⏱️', sub: 'total acumulado',    dest: 'capacitaciones' },
-                  { label: 'Presupuesto (CR)', valor: '₡' + stats.presupuesto.toLocaleString(), color: COLORS.rojo, icon: '💰', sub: 'ejecutado',        dest: 'presupuesto' },
+                  { label: 'Presupuesto (CR)', valor: '₡' + stats.presupuesto.toLocaleString(), color: COLORS.rojo, icon: '💰', sub: 'ejecutado',         dest: 'presupuesto' },
                 ].map(kpi => (
                   <div key={kpi.label} onClick={() => irA(kpi.dest)}
                     style={{ background: 'white', borderRadius: '12px', padding: '18px', borderLeft: `4px solid ${kpi.color}`, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', cursor: 'pointer' }}>
@@ -421,19 +401,14 @@ export default function App() {
                 ))}
               </div>
 
-              {/* Gráficas fila 1 */}
               <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px', marginBottom: '16px' }}>
-
-                {/* Barras por gerencia */}
                 <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                     <div>
                       <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>
                         {gerenciaSeleccionada ? `📂 ${gerenciaSeleccionada.nombre}` : '🏢 Participaciones por Gerencia'}
                       </div>
-                      {gerenciaSeleccionada && (
-                        <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '2px' }}>Desglose por departamento</div>
-                      )}
+                      {gerenciaSeleccionada && <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '2px' }}>Desglose por departamento · clic para volver</div>}
                     </div>
                     {gerenciaSeleccionada && (
                       <button onClick={() => setGerenciaSeleccionada(null)}
@@ -442,56 +417,35 @@ export default function App() {
                       </button>
                     )}
                   </div>
-                  {cargando ? (
-                    <div style={{ color: '#94A3B8', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Cargando...</div>
-                  ) : gerenciaSeleccionada ? (
-                    <GraficaBarras
-                      datos={gerenciaSeleccionada.departamentos}
-                      colorBarra={COLORS.morado}
-                      campoValor="total"
-                      labelKey="nombre"
-                    />
+                  {gerenciaSeleccionada ? (
+                    <GraficaBarras datos={gerenciaSeleccionada.departamentos} colorBarra={COLORS.morado} />
                   ) : (
-                    <GraficaBarras
-                      datos={graficas.gerencias}
-                      colorBarra={COLORS.azul}
-                      campoValor="total"
-                      labelKey="nombre"
-                    />
-                  )}
-                  {!gerenciaSeleccionada && graficas.gerencias.length > 0 && (
-                    <div style={{ fontSize: '10px', color: '#94A3B8', marginTop: '10px', textAlign: 'center' }}>
-                      💡 Haz clic en una barra para ver los departamentos
-                    </div>
+                    <>
+                      <GraficaBarras
+                        datos={graficas.gerencias}
+                        colorBarra={COLORS.azul}
+                        onBarClick={(d) => setGerenciaSeleccionada(d)}
+                      />
+                      {graficas.gerencias.length > 0 && (
+                        <div style={{ fontSize: '10px', color: '#94A3B8', marginTop: '10px', textAlign: 'center' }}>
+                          💡 Clic en una barra para ver departamentos
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
 
-                {/* Donut género */}
                 <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
-                  <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B', marginBottom: '16px' }}>
-                    👥 Distribución por Género
-                  </div>
-                  {cargando ? (
-                    <div style={{ color: '#94A3B8', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Cargando...</div>
-                  ) : (
-                    <GraficaDonut datos={graficas.generos} />
-                  )}
+                  <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B', marginBottom: '16px' }}>👥 Distribución por Género</div>
+                  <GraficaDonut datos={graficas.generos} />
                 </div>
               </div>
 
-              {/* Gráfica tendencia mensual */}
               <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: '16px' }}>
-                <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B', marginBottom: '16px' }}>
-                  📈 Tendencia Mensual — Participaciones y Horas
-                </div>
-                {cargando ? (
-                  <div style={{ color: '#94A3B8', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Cargando...</div>
-                ) : (
-                  <GraficaTendencia datos={graficas.mensual} />
-                )}
+                <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B', marginBottom: '16px' }}>📈 Tendencia Mensual — Participaciones y Horas</div>
+                <GraficaTendencia datos={graficas.mensual} />
               </div>
 
-              {/* Accesos rápidos */}
               <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                 <div style={{ fontSize: '14px', fontWeight: '500', marginBottom: '16px', color: '#1E293B' }}>Acciones rápidas</div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
@@ -528,7 +482,6 @@ export default function App() {
               <div style={{ fontSize: '13px', color: '#64748B' }}>Este módulo se construye en el siguiente paso</div>
             </div>
           )}
-
         </div>
       </div>
     </div>
