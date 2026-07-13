@@ -19,9 +19,7 @@ export default function ImportarCapacitaciones() {
 
   function normalizar(texto) {
     if (!texto) return ''
-    return texto.toString().trim()
-      .toLowerCase()
-      .replace(/\b\w/g, l => l.toUpperCase())
+    return texto.toString().trim().toLowerCase().replace(/\b\w/g, l => l.toUpperCase())
   }
 
   function limpiarEstado(e) {
@@ -87,8 +85,14 @@ export default function ImportarCapacitaciones() {
     if (!valor) return null
     const v = valor.toString().trim()
     if (!v || v === '0' || /^\d+$/.test(v)) return null
-    // Convertir a título
     return v.toLowerCase().replace(/\b\w/g, l => l.toUpperCase()).trim()
+  }
+
+  function limpiarTexto(valor) {
+    if (!valor) return null
+    const v = valor.toString().trim()
+    if (!v || v === '0' || v === '-') return null
+    return v
   }
 
   async function procesarArchivo(e) {
@@ -162,20 +166,14 @@ export default function ImportarCapacitaciones() {
 
     // ── PASO 2: Cargar IDs de capacitaciones ─────────────────────
     addLog('🔗 Paso 2: Obteniendo IDs de capacitaciones...')
-    const { data: capsDB } = await supabase
-      .from('capacitaciones')
-      .select('id, nombre')
-
+    const { data: capsDB } = await supabase.from('capacitaciones').select('id, nombre')
     const capIdMap = new Map()
     capsDB?.forEach(c => capIdMap.set(c.nombre.trim(), c.id))
     addLog(`✅ ${capIdMap.size} capacitaciones mapeadas`)
 
     // ── PASO 3: Cargar colaboradores ─────────────────────────────
     addLog('👥 Paso 3: Obteniendo colaboradores...')
-    const { data: colsDB } = await supabase
-      .from('colaboradores')
-      .select('id, correo, nombre')
-
+    const { data: colsDB } = await supabase.from('colaboradores').select('id, correo, nombre')
     const colIdMap = new Map()
     colsDB?.forEach(c => colIdMap.set(c.correo.toLowerCase().trim(), c.id))
     addLog(`✅ ${colIdMap.size} colaboradores en el sistema`)
@@ -195,6 +193,11 @@ export default function ImportarCapacitaciones() {
       const horasFila = Number(fila['Horas capacitación']) || 0
       const generoFila = limpiarGenero(fila['Género'])
       const costoFila = Number(fila['Costo']) || 0
+
+      // Datos organizacionales del Excel
+      const gerenciaFila = limpiarTexto(fila['Gerencia'])
+      const departamentoFila = limpiarTexto(fila['Departamento'])
+      const puestoFila = limpiarTexto(fila['Puesto'])
 
       const capId = capIdMap.get(nombreCap)
       if (!capId) { sinCap++; continue }
@@ -217,6 +220,9 @@ export default function ImportarCapacitaciones() {
         genero: generoFila,
         costo: costoFila,
         nombre_colab: nombreColab || null,
+        gerencia_colab: gerenciaFila,
+        departamento_colab: departamentoFila,
+        puesto_colab: puestoFila,
       })
     }
 
@@ -229,9 +235,7 @@ export default function ImportarCapacitaciones() {
 
     for (let i = 0; i < participantesLote.length; i += 100) {
       const batch = participantesLote.slice(i, i + 100)
-      const { error } = await supabase
-        .from('participantes')
-        .insert(batch)
+      const { error } = await supabase.from('participantes').insert(batch)
       if (!error) partInsertados += batch.length
       setProgreso(Math.round(((i + batch.length) / participantesLote.length) * 100))
     }
@@ -295,7 +299,7 @@ export default function ImportarCapacitaciones() {
       <div style={{ marginTop: '20px', background: 'white', borderRadius: '12px', padding: '18px', border: '1px solid #E2E8F0' }}>
         <div style={{ fontSize: '13px', fontWeight: '600', marginBottom: '10px', color: '#374151' }}>Columnas requeridas en el Excel:</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px' }}>
-          {['Nombre Capacitación *', 'Des_Temas', 'Fecha Inicio', 'Fecha fin', 'Horas capacitación *', 'Estado', 'Empresa', 'Facilitador', 'Correo (opcional)', 'Costo', 'Género', 'Colab'].map(c => (
+          {['Nombre Capacitación *', 'Des_Temas', 'Fecha Inicio', 'Fecha fin', 'Horas capacitación *', 'Estado', 'Empresa', 'Facilitador', 'Correo (opcional)', 'Costo', 'Género', 'Colab', 'Gerencia', 'Departamento', 'Puesto'].map(c => (
             <div key={c} style={{ fontSize: '12px', color: '#64748B', display: 'flex', alignItems: 'center', gap: '5px' }}>
               <span style={{ color: c.includes('*') ? '#0F9B72' : '#CBD5E1' }}>●</span>{c}
             </div>
