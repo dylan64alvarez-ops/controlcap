@@ -36,7 +36,7 @@ export default function Participantes({ onCambio }) {
   async function cargarTodo() {
     setCargando(true)
     const [cRes, colRes] = await Promise.all([
-      supabase.from('capacitaciones').select('id, nombre, horas, fecha_inicio').order('nombre'),
+      supabase.from('capacitaciones').select('id, nombre, horas, fecha_inicio, proveedor').order('nombre'),
       supabase.from('colaboradores').select('id, nombre, correo, gerencia, departamento, puesto').order('nombre')
     ])
 
@@ -86,7 +86,6 @@ export default function Participantes({ onCambio }) {
       if (capsAnio.length > 0) capIds = capsAnio.map(c => c.id)
     }
 
-    // Búsqueda en servidor
     let correosEncontrados = null
     if (busq && busq.trim().length > 0) {
       const t = busq.toLowerCase().trim()
@@ -99,7 +98,6 @@ export default function Participantes({ onCambio }) {
       )
       correosEncontrados = colsMatch.map(c => c.correo?.toLowerCase().trim()).filter(Boolean)
 
-      // Buscar en nombre_colab
       let qNombre = supabase.from('participantes').select('correo').ilike('nombre_colab', `%${t}%`)
       if (capIds) qNombre = qNombre.in('capacitacion_id', capIds)
       const { data: pNombres } = await qNombre
@@ -108,7 +106,6 @@ export default function Participantes({ onCambio }) {
         correosEncontrados = [...new Set([...correosEncontrados, ...extras])]
       }
 
-      // Buscar en gerencia_colab
       let qGer = supabase.from('participantes').select('correo').ilike('gerencia_colab', `%${t}%`)
       if (capIds) qGer = qGer.in('capacitacion_id', capIds)
       const { data: pGer } = await qGer
@@ -117,7 +114,6 @@ export default function Participantes({ onCambio }) {
         correosEncontrados = [...new Set([...correosEncontrados, ...extras])]
       }
 
-      // Buscar por correo directo
       let qCorreo = supabase.from('participantes').select('correo').ilike('correo', `%${t}%`)
       if (capIds) qCorreo = qCorreo.in('capacitacion_id', capIds)
       const { data: pCorreos } = await qCorreo
@@ -147,8 +143,6 @@ export default function Participantes({ onCambio }) {
 
     const enriquecidos = (data || []).map(p => {
       const c = cMapU[p.capacitacion_id] || null
-
-      // Buscar colaborador por ID, correo o nombre
       const colPorId = cByIdU[p.colaborador_id]
       const colPorCorreo = p.correo && !p.correo.startsWith('sin-correo__')
         ? cByCorreoU[p.correo.toLowerCase().trim()]
@@ -156,13 +150,10 @@ export default function Participantes({ onCambio }) {
       const colPorNombre = p.nombre_colab
         ? cByNombreU[p.nombre_colab.toUpperCase().trim()]
         : null
-
       const col = colPorId || colPorCorreo || colPorNombre || null
 
-      // Resolver correo: primero del colaborador activo, luego del registro, luego del match por nombre
       const correoResuelto = col?.correo ||
-        (p.correo && !p.correo.startsWith('sin-correo__') ? p.correo : null) ||
-        null
+        (p.correo && !p.correo.startsWith('sin-correo__') ? p.correo : null) || null
 
       return {
         ...p,
@@ -174,6 +165,7 @@ export default function Participantes({ onCambio }) {
         _gerencia: col?.gerencia || p.gerencia_colab || '—',
         _departamento: col?.departamento || p.departamento_colab || '—',
         _puesto: col?.puesto || p.puesto_colab || '—',
+        _proveedor: c?.proveedor || '—',
       }
     })
 
@@ -310,7 +302,7 @@ export default function Participantes({ onCambio }) {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#F8FAFC' }}>
-                  {['Colaborador', 'Correo', 'Gerencia', 'Puesto', 'Capacitación', 'Año', 'Horas', 'Género'].map(h => (
+                  {['Colaborador', 'Correo', 'Gerencia', 'Puesto', 'Capacitación', 'Proveedor', 'Año', 'Horas', 'Género'].map(h => (
                     <th key={h} style={{ padding: '10px 12px', fontSize: '11px', fontWeight: '600', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid #E2E8F0', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -323,6 +315,7 @@ export default function Participantes({ onCambio }) {
                     <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{p._gerencia}</td>
                     <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p._puesto}</td>
                     <td style={{ padding: '10px 12px', fontSize: '12px', color: '#374151', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p._cap?.nombre || '—'}</td>
+                    <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B', maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p._proveedor}</td>
                     <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{p._anio || '—'}</td>
                     <td style={{ padding: '10px 12px', fontSize: '13px', fontWeight: '600', color: '#0F9B72' }}>{p.horas || 0}h</td>
                     <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>
