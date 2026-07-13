@@ -55,7 +55,6 @@ export default function Participantes({ onCambio }) {
       if (c.nombre) cByNombre[c.nombre.toUpperCase().trim()] = c
     })
 
-    // Extraer proveedores únicos
     const provsUnicas = [...new Set(caps.map(c => c.proveedor).filter(Boolean))].sort()
 
     setCapacitaciones(caps)
@@ -81,21 +80,20 @@ export default function Participantes({ onCambio }) {
     const desde = pag * POR_PAGINA
     const hasta = desde + POR_PAGINA - 1
 
-    // Filtrar capacitaciones por año y proveedor
+    // Calcular capIds solo si hay filtro de año o proveedor
     let capIds = null
-    let capsFiltered = capsU
-    if (anio) {
-      capsFiltered = capsFiltered.filter(c => c.fecha_inicio && new Date(c.fecha_inicio).getFullYear() === parseInt(anio))
+    if (anio || prov) {
+      let capsFiltered = capsU
+      if (anio) capsFiltered = capsFiltered.filter(c => c.fecha_inicio && new Date(c.fecha_inicio).getFullYear() === parseInt(anio))
+      if (prov) capsFiltered = capsFiltered.filter(c => c.proveedor === prov)
+
+      if (capsFiltered.length === 0 && !busq) {
+        setParticipantes([])
+        setTotalCount(0)
+        return
+      }
+      if (capsFiltered.length > 0) capIds = capsFiltered.map(c => c.id)
     }
-    if (prov) {
-      capsFiltered = capsFiltered.filter(c => c.proveedor === prov)
-    }
-    if ((anio || prov) && capsFiltered.length === 0 && !busq) {
-      setParticipantes([])
-      setTotalCount(0)
-      return
-    }
-    if (capsFiltered.length > 0) capIds = capsFiltered.map(c => c.id)
 
     // Búsqueda en servidor
     let correosEncontrados = null
@@ -249,7 +247,6 @@ export default function Participantes({ onCambio }) {
     setGuardando(false)
   }
 
-  // Capacitaciones filtradas por año y proveedor para el selector
   const capsFiltradasSelector = capacitaciones
     .filter(c => !filtroAnio || (c.fecha_inicio && new Date(c.fecha_inicio).getFullYear() === parseInt(filtroAnio)))
     .filter(c => !filtroProveedor || c.proveedor === filtroProveedor)
@@ -279,7 +276,6 @@ export default function Participantes({ onCambio }) {
         </button>
       </div>
 
-      {/* Filtros */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
         <input
           type="text"
@@ -289,7 +285,7 @@ export default function Participantes({ onCambio }) {
           style={{ ...inp, width: '260px' }}
         />
         <select value={filtroAnio} onChange={e => { setFiltroAnio(e.target.value); setFiltroCap('') }}
-          style={{ ...inp, width: '110px' }}>
+          style={{ ...inp, width: '120px' }}>
           <option value="">Todos los años</option>
           {ANIOS.map(a => <option key={a} value={a}>{a}</option>)}
         </select>
@@ -311,7 +307,6 @@ export default function Participantes({ onCambio }) {
         )}
       </div>
 
-      {/* Tabla */}
       <div style={{ background: 'white', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', overflow: 'hidden' }}>
         {cargando && participantes.length === 0 ? (
           <div style={{ padding: '40px', textAlign: 'center', color: '#94A3B8' }}>Cargando participantes...</div>
@@ -361,7 +356,6 @@ export default function Participantes({ onCambio }) {
         )}
       </div>
 
-      {/* Modal */}
       {modal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: 'white', borderRadius: '16px', width: '520px', maxWidth: '95vw', maxHeight: '90vh', overflow: 'auto' }}>
