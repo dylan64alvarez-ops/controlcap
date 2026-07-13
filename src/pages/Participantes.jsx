@@ -1,378 +1,311 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
+import * as XLSX from 'xlsx'
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
 )
 
-const ANIOS = ['2026', '2025', '2024', '2023', '2022', '2021']
-const POR_PAGINA = 200
+export default function ImportarCapacitaciones() {
+  const [estado, setEstado] = useState('idle')
+  const [log, setLog] = useState([])
+  const [progreso, setProgreso] = useState(0)
+  const [total, setTotal] = useState(0)
 
-export default function Participantes({ onCambio }) {
-  const [participantes, setParticipantes] = useState([])
-  const [totalCount, setTotalCount] = useState(0)
-  const [capacitaciones, setCapacitaciones] = useState([])
-  const [colaboradores, setColaboradores] = useState([])
-  const [capMap, setCapMap] = useState({})
-  const [colByIdMap, setColByIdMap] = useState({})
-  const [colByCorreoMap, setColByCorreoMap] = useState({})
-  const [modal, setModal] = useState(false)
-  const [busquedaColab, setBusquedaColab] = useState('')
-  const [resultados, setResultados] = useState([])
-  const [capSeleccionada, setCapSeleccionada] = useState('')
-  const [guardando, setGuardando] = useState(false)
-  const [exito, setExito] = useState('')
-  const [filtroCap, setFiltroCap] = useState('')
-  const [filtroAnio, setFiltroAnio] = useState('2026')
-  const [busqueda, setBusqueda] = useState('')
-  const [cargando, setCargando] = useState(true)
-  const [cargadoInicial, setCargadoInicial] = useState(false)
-  const [paginaActual, setPaginaActual] = useState(0)
-
-  useEffect(() => { cargarTodo() }, [])
-
-  async function cargarTodo() {
-    setCargando(true)
-    const [cRes, colRes] = await Promise.all([
-      supabase.from('capacitaciones').select('id, nombre, horas, fecha_inicio').order('nombre'),
-      supabase.from('colaboradores').select('id, nombre, correo, gerencia, departamento, puesto').order('nombre')
-    ])
-
-    const caps = cRes.data || []
-    const cols = colRes.data || []
-
-    const cMap = {}
-    caps.forEach(c => { cMap[c.id] = c })
-
-    const cById = {}, cByCorreo = {}
-    cols.forEach(c => {
-      cById[c.id] = c
-      if (c.correo) cByCorreo[c.correo.toLowerCase().trim()] = c
-    })
-
-    setCapacitaciones(caps)
-    setColaboradores(cols)
-    setCapMap(cMap)
-    setColByIdMap(cById)
-    setColByCorreoMap(cByCorreo)
-
-    await buscarConFiltros(0, '2026', '', '', cMap, cById, cByCorreo, caps, true)
-    setCargadoInicial(true)
-    setCargando(false)
+  function addLog(msg, tipo = 'info') {
+    setLog(prev => [...prev, { msg, tipo, ts: new Date().toLocaleTimeString() }])
   }
 
-  async function buscarConFiltros(pag, anio, cap, busq, cMapR, cByIdR, cByCorreoR, capsR, reset) {
-    const cMapU = cMapR || capMap
-    const cByIdU = cByIdR || colByIdMap
-    const cByCorreoU = cByCorreoR || colByCorreoMap
-    const capsU = capsR || capacitaciones
+  function normalizar(texto) {
+    if (!texto) return ''
+    return texto.toString().trim().toLowerCase().replace(/\b\w/g, l => l.toUpperCase())
+  }
 
-    const desde = pag * POR_PAGINA
-    const hasta = desde + POR_PAGINA - 1
+  function limpiarEstado(e) {
+    if (!e) return 'Completada'
+    const s = e.toString().toLowerCase().trim()
+    if (s.includes('finaliz')) return 'Completada'
+    if (s.includes('curso') || s.includes('progreso')) return 'En curso'
+    if (s.includes('pend')) return 'Programada'
+    if (s.includes('cancel')) return 'Cancelada'
+    return 'Completada'
+  }
 
-    // Obtener IDs de capacitaciones del año
-    let capIds = null
-    if (anio) {
-      const capsAnio = capsU.filter(c => c.fecha_inicio && new Date(c.fecha_inicio).getFullYear() === parseInt(anio))
-      if (capsAnio.length === 0 && !busq) {
-        setParticipantes([])
-        setTotalCount(0)
-        return
+  function limpiarCategoria(des) {
+    if (!des) return ''
+    const d = des.toString().trim()
+    if (d.includes('UC1') && d.includes('Inducción')) return 'UC1 · Inducción Corporativa'
+    if (d.includes('UC1') && d.includes('Formación')) return 'UC1 · Formación al Puesto'
+    if (d.includes('UC2') && d.includes('Normativ')) return 'UC2 · Código de Conducta'
+    if (d.includes('UC2') && d.includes('Competencia')) return 'UC2 · Competencias Digitales'
+    if (d.includes('UC3') && d.includes('Transform')) return 'UC3 · Transformación Empresarial'
+    if (d.includes('UC3')) return 'UC3 · Capacitación Especializada'
+    if (d.includes('UC4') && d.includes('Liderazgo')) return 'UC4 · Programa de Liderazgo'
+    if (d.includes('UC4')) return 'UC4 · Puestos Clave'
+    if (d.includes('UC5')) return 'UC5 · Salud y Bienestar'
+    return d
+  }
+
+  function excelFecha(valor) {
+    if (!valor) return null
+    try {
+      if (valor instanceof Date) return valor.toISOString().split('T')[0]
+      const str = valor.toString().trim()
+      if (str.match(/^\d{4}-\d{2}-\d{2}/)) return str.slice(0, 10)
+      if (str.includes('/')) {
+        const p = str.split('/')
+        if (p.length === 3) return `${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`
       }
-      if (capsAnio.length > 0) capIds = capsAnio.map(c => c.id)
+      const num = Number(str)
+      if (!isNaN(num) && num > 1000) {
+        const d = new Date((num - 25569) * 86400 * 1000)
+        return d.toISOString().split('T')[0]
+      }
+    } catch { return null }
+    return null
+  }
+
+  function resolverCorreo(valor, nombreColab, nombreCap) {
+    const raw = (valor || '').toString().trim().toLowerCase()
+    if (raw && raw.includes('@')) return raw
+    const base = `sin-correo__${(nombreColab || '').toLowerCase().replace(/\s+/g, '_')}__${(nombreCap || '').toLowerCase().replace(/\s+/g, '_')}`
+    return base
+  }
+
+  function limpiarGenero(valor) {
+    if (!valor) return null
+    const g = valor.toString().trim().toUpperCase()
+    if (g.includes('FEM') || g === 'F') return 'FEMENINO'
+    if (g.includes('MAS') || g === 'M') return 'MASCULINO'
+    return null
+  }
+
+  function limpiarNombre(valor) {
+    if (!valor) return null
+    const v = valor.toString().trim()
+    if (!v || v === '0' || /^\d+$/.test(v)) return null
+    return v.toLowerCase().replace(/\b\w/g, l => l.toUpperCase()).trim()
+  }
+
+  function limpiarTexto(valor) {
+    if (!valor) return null
+    const v = valor.toString().trim()
+    if (!v || v === '0' || v === '-') return null
+    return v
+  }
+
+  async function procesarArchivo(e) {
+    const archivo = e.target.files[0]
+    if (!archivo) return
+
+    setEstado('procesando')
+    setLog([])
+    setProgreso(0)
+
+    addLog('📂 Leyendo archivo Excel...')
+
+    const buffer = await archivo.arrayBuffer()
+    const wb = XLSX.read(buffer, { cellDates: false, raw: true })
+
+    const nombreHoja = wb.SheetNames.find(n =>
+      n.toLowerCase().includes('reporte') ||
+      n.toLowerCase().includes('datos') ||
+      n.toLowerCase().includes('hoja')
+    ) || wb.SheetNames[0]
+
+    addLog(`📋 Hoja detectada: "${nombreHoja}"`)
+
+    const ws = wb.Sheets[nombreHoja]
+    const filas = XLSX.utils.sheet_to_json(ws, { raw: true })
+
+    if (filas.length === 0) {
+      addLog('❌ No se encontraron datos', 'error')
+      setEstado('error')
+      return
     }
 
-    // Búsqueda por texto
-    let correosEncontrados = null
-    if (busq && busq.trim().length > 0) {
-      const t = busq.toLowerCase().trim()
+    addLog(`✅ ${filas.length} filas encontradas`)
+    setTotal(filas.length)
 
-      // Buscar en colaboradores locales por nombre, correo, gerencia, puesto
-      const colsMatch = Object.values(cByIdU).filter(c =>
-        c.nombre?.toLowerCase().includes(t) ||
-        c.correo?.toLowerCase().includes(t) ||
-        c.gerencia?.toLowerCase().includes(t) ||
-        c.puesto?.toLowerCase().includes(t)
-      )
-      correosEncontrados = colsMatch.map(c => c.correo?.toLowerCase().trim()).filter(Boolean)
+    // ── PASO 1: Crear capacitaciones únicas ──────────────────────
+    addLog('🎓 Paso 1: Procesando capacitaciones únicas...')
 
-      // Buscar en nombre_colab directamente en Supabase
-      let qNombre = supabase
-        .from('participantes')
-        .select('correo')
-        .ilike('nombre_colab', `%${t}%`)
-      if (capIds) qNombre = qNombre.in('capacitacion_id', capIds)
-      const { data: pNombres } = await qNombre
-      if (pNombres) {
-        const extraCorreos = pNombres.map(p => p.correo?.toLowerCase().trim()).filter(Boolean)
-        correosEncontrados = [...new Set([...correosEncontrados, ...extraCorreos])]
-      }
-
-      // Buscar también por correo directo
-      let qCorreo = supabase
-        .from('participantes')
-        .select('correo')
-        .ilike('correo', `%${t}%`)
-      if (capIds) qCorreo = qCorreo.in('capacitacion_id', capIds)
-      const { data: pCorreos } = await qCorreo
-      if (pCorreos) {
-        const extras = pCorreos.map(p => p.correo?.toLowerCase().trim()).filter(Boolean)
-        correosEncontrados = [...new Set([...correosEncontrados, ...extras])]
-      }
-
-      if (correosEncontrados.length === 0) {
-        setParticipantes([])
-        setTotalCount(0)
-        return
-      }
+    const capMap = new Map()
+    for (const fila of filas) {
+      const nombre = (fila['Nombre Capacitación'] || '').toString().trim()
+      if (!nombre || capMap.has(nombre)) continue
+      capMap.set(nombre, {
+        nombre,
+        categoria: limpiarCategoria(fila['Des_Temas'] || ''),
+        modalidad: 'Virtual',
+        estado: limpiarEstado(fila['Estado']),
+        facilitador: (fila['Facilitador'] || '').toString().trim(),
+        proveedor: normalizar(fila['Empresa'] || ''),
+        fecha_inicio: excelFecha(fila['Fecha Inicio']),
+        fecha_fin: excelFecha(fila['Fecha fin']),
+        horas: Number(fila['Horas capacitación']) || 0,
+        costo: Number(fila['Costo']) || 0,
+      })
     }
 
-    let q = supabase
-      .from('participantes')
-      .select('*', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(desde, hasta)
+    addLog(`📝 ${capMap.size} capacitaciones únicas identificadas`)
 
-    if (capIds) q = q.in('capacitacion_id', capIds)
-    if (cap) q = q.eq('capacitacion_id', cap)
-    if (correosEncontrados) q = q.in('correo', correosEncontrados)
+    const capsArray = Array.from(capMap.values())
+    let capsInsertadas = 0
 
-    const { data, count } = await q
-
-    const enriquecidos = (data || []).map(p => {
-      const c = cMapU[p.capacitacion_id] || null
-      const col = cByIdU[p.colaborador_id] || cByCorreoU[p.correo?.toLowerCase().trim()] || null
-      return { ...p, _cap: c, _col: col, _anio: c?.fecha_inicio ? new Date(c.fecha_inicio).getFullYear() : null }
-    })
-
-    if (reset || pag === 0) {
-      setParticipantes(enriquecidos)
-    } else {
-      setParticipantes(prev => [...prev, ...enriquecidos])
+    for (let i = 0; i < capsArray.length; i += 50) {
+      const batch = capsArray.slice(i, i + 50)
+      const { error } = await supabase
+        .from('capacitaciones')
+        .upsert(batch, { onConflict: 'nombre', ignoreDuplicates: true })
+      if (!error) capsInsertadas += batch.length
     }
-    setTotalCount(count || 0)
-    setPaginaActual(pag)
-  }
 
-  // Debounce para búsqueda
-  useEffect(() => {
-    if (!cargadoInicial) return
-    const timer = setTimeout(() => {
-      setCargando(true)
-      buscarConFiltros(0, filtroAnio, filtroCap, busqueda, null, null, null, null, true)
-        .then(() => setCargando(false))
-    }, 400)
-    return () => clearTimeout(timer)
-  }, [busqueda, filtroAnio, filtroCap, cargadoInicial])
+    addLog(`✅ ${capsInsertadas} capacitaciones importadas`)
 
-  useEffect(() => {
-    if (!busquedaColab) { setResultados([]); return }
-    const b = busquedaColab.toLowerCase()
-    setResultados(
-      colaboradores.filter(c =>
-        c.nombre?.toLowerCase().includes(b) ||
-        c.correo?.toLowerCase().includes(b)
-      ).slice(0, 8)
-    )
-  }, [busquedaColab, colaboradores])
+    // ── PASO 2: Cargar IDs de capacitaciones ─────────────────────
+    addLog('🔗 Paso 2: Obteniendo IDs de capacitaciones...')
+    const { data: capsDB } = await supabase.from('capacitaciones').select('id, nombre')
+    const capIdMap = new Map()
+    capsDB?.forEach(c => capIdMap.set(c.nombre.trim(), c.id))
+    addLog(`✅ ${capIdMap.size} capacitaciones mapeadas`)
 
-  async function cargarMas() {
-    const nueva = paginaActual + 1
-    setCargando(true)
-    await buscarConFiltros(nueva, filtroAnio, filtroCap, busqueda, null, null, null, null, false)
-    setCargando(false)
-  }
+    // ── PASO 3: Cargar colaboradores ─────────────────────────────
+    addLog('👥 Paso 3: Obteniendo colaboradores...')
+    const { data: colsDB } = await supabase.from('colaboradores').select('id, correo, nombre')
+    const colIdMap = new Map()
+    colsDB?.forEach(c => colIdMap.set(c.correo.toLowerCase().trim(), c.id))
+    addLog(`✅ ${colIdMap.size} colaboradores en el sistema`)
 
-  async function agregar(colaborador) {
-    if (!capSeleccionada) { alert('Seleccioná una capacitación primero'); return }
-    const cap = capacitaciones.find(c => c.id === capSeleccionada)
-    setGuardando(true)
-    const { error } = await supabase.from('participantes').insert([{
-      capacitacion_id: capSeleccionada,
-      colaborador_id: colaborador.id,
-      correo: colaborador.correo.toLowerCase().trim(),
-      horas: cap?.horas || 0,
-      genero: null,
-      costo: 0,
-      nombre_colab: colaborador.nombre,
-    }])
-    if (!error) {
-      setExito(`✅ ${colaborador.nombre} agregado correctamente`)
-      setBusquedaColab('')
-      setResultados([])
-      setCargando(true)
-      await buscarConFiltros(0, filtroAnio, filtroCap, busqueda, null, null, null, null, true)
-      setCargando(false)
-      if (onCambio) onCambio()
-      setTimeout(() => setExito(''), 3000)
-    } else {
-      alert('Error: ' + error.message)
+    // ── PASO 4: Crear participantes ──────────────────────────────
+    addLog('👤 Paso 4: Procesando participantes...')
+
+    const participantesLote = []
+    let sinCorreo = 0, sinColab = 0, sinCap = 0
+    const vistos = new Set()
+
+    for (const fila of filas) {
+      const nombreCap = (fila['Nombre Capacitación'] || '').toString().trim()
+      const nombreColabRaw = fila['Colab '] || fila['Colaborador'] || ''
+      const nombreColab = limpiarNombre(nombreColabRaw) || ''
+      const correoRaw = (fila['Correo'] || '').toString().trim().toLowerCase()
+      const horasFila = Number(fila['Horas capacitación']) || 0
+      const generoFila = limpiarGenero(fila['Género'])
+      const costoFila = Number(fila['Costo']) || 0
+
+      // Datos organizacionales del Excel
+      const gerenciaFila = limpiarTexto(fila['Gerencia'])
+      const departamentoFila = limpiarTexto(fila['Departamento'])
+      const puestoFila = limpiarTexto(fila['Puesto'])
+
+      const capId = capIdMap.get(nombreCap)
+      if (!capId) { sinCap++; continue }
+
+      const correo = resolverCorreo(correoRaw, nombreColab, nombreCap)
+      if (!correoRaw || !correoRaw.includes('@')) sinCorreo++
+
+      const colId = colIdMap.get(correoRaw) || null
+      if (correoRaw && correoRaw.includes('@') && !colId) sinColab++
+
+      const clave = `${correo}||${capId}`
+      if (vistos.has(clave)) continue
+      vistos.add(clave)
+
+      participantesLote.push({
+        colaborador_id: colId,
+        capacitacion_id: capId,
+        correo: correo,
+        horas: horasFila,
+        genero: generoFila,
+        costo: costoFila,
+        nombre_colab: nombreColab || null,
+        gerencia_colab: gerenciaFila,
+        departamento_colab: departamentoFila,
+        puesto_colab: puestoFila,
+      })
     }
-    setGuardando(false)
+
+    addLog(`📊 ${participantesLote.length} participantes únicos a importar`)
+    if (sinCorreo > 0) addLog(`⚠️ ${sinCorreo} filas sin correo válido (se importan igual)`, 'warn')
+    if (sinColab > 0) addLog(`⚠️ ${sinColab} participantes ya no están en la organización (se importan igual)`, 'warn')
+    if (sinCap > 0) addLog(`⚠️ ${sinCap} filas con capacitación no encontrada (se omiten)`, 'warn')
+
+    let partInsertados = 0
+
+    for (let i = 0; i < participantesLote.length; i += 100) {
+      const batch = participantesLote.slice(i, i + 100)
+      const { error } = await supabase.from('participantes').insert(batch)
+      if (!error) partInsertados += batch.length
+      setProgreso(Math.round(((i + batch.length) / participantesLote.length) * 100))
+    }
+
+    setProgreso(100)
+    addLog(`✅ ${partInsertados} participantes importados correctamente`)
+    addLog(`🎉 ¡Importación masiva completada!`, 'success')
+    setEstado('listo')
   }
 
-  const inp = {
-    height: '36px', border: '1px solid #E2E8F0', borderRadius: '8px',
-    padding: '0 10px', fontSize: '13px', outline: 'none', background: 'white'
-  }
+  const colorLog = { info: '#374151', warn: '#D97706', error: '#DC2626', success: '#0F9B72' }
 
   return (
-    <div>
-      {exito && (
-        <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '8px', padding: '12px 16px', marginBottom: '16px', fontSize: '13px', color: '#166534' }}>
-          {exito}
-        </div>
-      )}
+    <div style={{ maxWidth: '700px' }}>
+      <h2 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '6px' }}>
+        Importación masiva de capacitaciones
+      </h2>
+      <p style={{ fontSize: '13px', color: '#64748B', marginBottom: '24px' }}>
+        Cargá tu Excel histórico. El sistema crea las capacitaciones y asigna los participantes automáticamente.
+      </p>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <div style={{ fontSize: '13px', color: '#64748B' }}>
-          {cargando ? 'Buscando...' : `${participantes.length} de ${totalCount.toLocaleString()} participantes`}
-        </div>
-        <button onClick={() => setModal(true)}
-          style={{ background: '#8131B0', color: 'white', border: 'none', padding: '8px 18px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>
-          + Agregar participante
-        </button>
+      <div style={{ border: '2px dashed #CBD5E1', borderRadius: '12px', padding: '32px', textAlign: 'center', background: 'white', marginBottom: '20px' }}>
+        <div style={{ fontSize: '36px', marginBottom: '10px' }}>📊</div>
+        <div style={{ fontSize: '15px', fontWeight: '500', marginBottom: '6px' }}>Seleccioná tu Excel de capacitaciones</div>
+        <div style={{ fontSize: '12px', color: '#94A3B8', marginBottom: '16px' }}>Compatible con cualquier nombre de hoja</div>
+        <input type="file" accept=".xlsx,.xls" onChange={procesarArchivo} disabled={estado === 'procesando'} style={{ display: 'none' }} id="fileCapInput" />
+        <label htmlFor="fileCapInput" style={{
+          background: estado === 'procesando' ? '#E2E8F0' : '#8131B0',
+          color: estado === 'procesando' ? '#94A3B8' : 'white',
+          padding: '10px 24px', borderRadius: '8px',
+          cursor: estado === 'procesando' ? 'not-allowed' : 'pointer',
+          fontSize: '13px', fontWeight: '500'
+        }}>
+          {estado === 'procesando' ? '⏳ Procesando...' : 'Elegir archivo Excel'}
+        </label>
       </div>
 
-      {/* Filtros */}
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
-        <input
-          type="text"
-          placeholder="🔍 Nombre, correo, capacitación, gerencia o puesto..."
-          value={busqueda}
-          onChange={e => setBusqueda(e.target.value)}
-          style={{ ...inp, width: '300px' }}
-        />
-        <select value={filtroAnio} onChange={e => { setFiltroAnio(e.target.value); setFiltroCap('') }}
-          style={{ ...inp, width: '120px' }}>
-          <option value="">Todos los años</option>
-          {ANIOS.map(a => <option key={a} value={a}>{a}</option>)}
-        </select>
-        <select value={filtroCap} onChange={e => setFiltroCap(e.target.value)}
-          style={{ ...inp, width: '300px' }}>
-          <option value="">Todas las capacitaciones</option>
-          {capacitaciones
-            .filter(c => !filtroAnio || (c.fecha_inicio && new Date(c.fecha_inicio).getFullYear() === parseInt(filtroAnio)))
-            .map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-        </select>
-        {(filtroCap || busqueda) && (
-          <button onClick={() => { setFiltroCap(''); setBusqueda('') }}
-            style={{ ...inp, width: 'auto', padding: '0 14px', cursor: 'pointer', color: '#64748B' }}>
-            ✕ Limpiar
-          </button>
-        )}
-      </div>
-
-      {/* Tabla */}
-      <div style={{ background: 'white', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', overflow: 'hidden' }}>
-        {cargando && participantes.length === 0 ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#94A3B8' }}>Cargando participantes...</div>
-        ) : participantes.length === 0 ? (
-          <div style={{ padding: '50px', textAlign: 'center', color: '#94A3B8' }}>
-            <div style={{ fontSize: '32px', marginBottom: '10px' }}>👥</div>
-            <div style={{ fontWeight: '500', marginBottom: '6px' }}>No hay participantes</div>
-            <div style={{ fontSize: '13px' }}>Ajustá los filtros para ver resultados</div>
+      {estado === 'procesando' && (
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#64748B', marginBottom: '6px' }}>
+            <span>Importando participantes...</span>
+            <span>{progreso}%</span>
           </div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ background: '#F8FAFC' }}>
-                  {['Colaborador', 'Correo', 'Gerencia', 'Puesto', 'Capacitación', 'Año', 'Horas', 'Género'].map(h => (
-                    <th key={h} style={{ padding: '10px 12px', fontSize: '11px', fontWeight: '600', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid #E2E8F0', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {participantes.map((p, i) => {
-                  const correoMostrar = (!p.correo || p.correo.startsWith('sin-correo__')) ? '—' : p.correo
-                  const nombreMostrar = p._col?.nombre || p.nombre_colab || '—'
-                  return (
-                    <tr key={p.id} style={{ background: i % 2 === 0 ? 'white' : '#FAFAFA' }}>
-                      <td style={{ padding: '10px 12px', fontWeight: '500', fontSize: '13px', whiteSpace: 'nowrap' }}>{nombreMostrar}</td>
-                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#0072DA' }}>{correoMostrar}</td>
-                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{p._col?.gerencia || '—'}</td>
-                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p._col?.puesto || '—'}</td>
-                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#374151', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p._cap?.nombre || '—'}</td>
-                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{p._anio || '—'}</td>
-                      <td style={{ padding: '10px 12px', fontSize: '13px', fontWeight: '600', color: '#0F9B72' }}>{p.horas || 0}h</td>
-                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>
-                        {p.genero === 'FEMENINO' ? '♀ F' : p.genero === 'MASCULINO' ? '♂ M' : '—'}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-            {participantes.length < totalCount && (
-              <div style={{ padding: '16px', textAlign: 'center', borderTop: '1px solid #E2E8F0' }}>
-                <button onClick={cargarMas} disabled={cargando}
-                  style={{ background: '#8131B0', color: 'white', border: 'none', padding: '8px 24px', borderRadius: '8px', cursor: cargando ? 'not-allowed' : 'pointer', fontSize: '13px' }}>
-                  {cargando ? 'Cargando...' : `Cargar más (${totalCount - participantes.length} restantes)`}
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Modal */}
-      {modal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'white', borderRadius: '16px', width: '520px', maxWidth: '95vw', maxHeight: '90vh', overflow: 'auto' }}>
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontSize: '16px', fontWeight: '600' }}>Agregar participante</div>
-              <button onClick={() => { setModal(false); setBusquedaColab(''); setResultados([]) }}
-                style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#94A3B8' }}>✕</button>
-            </div>
-            <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }}>Capacitación *</label>
-                <select value={capSeleccionada} onChange={e => setCapSeleccionada(e.target.value)} style={{ ...inp, width: '100%' }}>
-                  <option value="">Seleccionar capacitación...</option>
-                  {capacitaciones.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }}>Buscar colaborador *</label>
-                <input
-                  type="text"
-                  placeholder="Escribí el nombre o correo..."
-                  value={busquedaColab}
-                  onChange={e => setBusquedaColab(e.target.value)}
-                  style={{ ...inp, width: '100%' }}
-                />
-              </div>
-              {resultados.length > 0 && (
-                <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
-                  {resultados.map((c, i) => (
-                    <div key={c.id} onClick={() => agregar(c)}
-                      style={{ padding: '10px 14px', cursor: 'pointer', fontSize: '13px', background: i % 2 === 0 ? 'white' : '#F8FAFC', borderBottom: i < resultados.length - 1 ? '1px solid #F1F5F9' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <div style={{ fontWeight: '500', color: '#1E293B' }}>{c.nombre}</div>
-                        <div style={{ fontSize: '11px', color: '#94A3B8' }}>{c.correo} · {c.gerencia}</div>
-                      </div>
-                      <span style={{ background: '#EEF0FF', color: '#8131B0', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '500' }}>
-                        {guardando ? '...' : '+ Agregar'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {busquedaColab && resultados.length === 0 && (
-                <div style={{ fontSize: '13px', color: '#94A3B8', textAlign: 'center', padding: '10px' }}>No se encontraron colaboradores</div>
-              )}
-            </div>
-            <div style={{ padding: '16px 24px', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'flex-end' }}>
-              <button onClick={() => { setModal(false); setBusquedaColab(''); setResultados([]) }}
-                style={{ padding: '8px 18px', border: '1px solid #E2E8F0', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', background: 'white' }}>
-                Cerrar
-              </button>
-            </div>
+          <div style={{ background: '#E2E8F0', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
+            <div style={{ background: '#8131B0', height: '100%', width: `${progreso}%`, borderRadius: '4px', transition: 'width 0.3s' }} />
           </div>
         </div>
       )}
+
+      {log.length > 0 && (
+        <div style={{ background: '#0F172A', borderRadius: '10px', padding: '16px', fontFamily: 'monospace', fontSize: '12px', maxHeight: '300px', overflowY: 'auto' }}>
+          {log.map((l, i) => (
+            <div key={i} style={{ color: colorLog[l.tipo] || '#94A3B8', marginBottom: '4px' }}>
+              <span style={{ color: '#475569', marginRight: '8px' }}>{l.ts}</span>
+              {l.msg}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ marginTop: '20px', background: 'white', borderRadius: '12px', padding: '18px', border: '1px solid #E2E8F0' }}>
+        <div style={{ fontSize: '13px', fontWeight: '600', marginBottom: '10px', color: '#374151' }}>Columnas requeridas en el Excel:</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px' }}>
+          {['Nombre Capacitación *', 'Des_Temas', 'Fecha Inicio', 'Fecha fin', 'Horas capacitación *', 'Estado', 'Empresa', 'Facilitador', 'Correo (opcional)', 'Costo', 'Género', 'Colab', 'Gerencia', 'Departamento', 'Puesto'].map(c => (
+            <div key={c} style={{ fontSize: '12px', color: '#64748B', display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <span style={{ color: c.includes('*') ? '#0F9B72' : '#CBD5E1' }}>●</span>{c}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
