@@ -83,6 +83,14 @@ export default function ImportarCapacitaciones() {
     return null
   }
 
+  function limpiarNombre(valor) {
+    if (!valor) return null
+    const v = valor.toString().trim()
+    if (!v || v === '0' || /^\d+$/.test(v)) return null
+    // Convertir a título
+    return v.toLowerCase().replace(/\b\w/g, l => l.toUpperCase()).trim()
+  }
+
   async function procesarArchivo(e) {
     const archivo = e.target.files[0]
     if (!archivo) return
@@ -166,24 +174,23 @@ export default function ImportarCapacitaciones() {
     addLog('👥 Paso 3: Obteniendo colaboradores...')
     const { data: colsDB } = await supabase
       .from('colaboradores')
-      .select('id, correo')
+      .select('id, correo, nombre')
 
     const colIdMap = new Map()
     colsDB?.forEach(c => colIdMap.set(c.correo.toLowerCase().trim(), c.id))
     addLog(`✅ ${colIdMap.size} colaboradores en el sistema`)
 
-    // ── PASO 4: Crear participantes con horas, género y costo ────
+    // ── PASO 4: Crear participantes ──────────────────────────────
     addLog('👤 Paso 4: Procesando participantes...')
 
     const participantesLote = []
-    let sinCorreo = 0
-    let sinColab = 0
-    let sinCap = 0
+    let sinCorreo = 0, sinColab = 0, sinCap = 0
     const vistos = new Set()
 
     for (const fila of filas) {
       const nombreCap = (fila['Nombre Capacitación'] || '').toString().trim()
-      const nombreColab = (fila['Colab '] || fila['Colaborador'] || '').toString().trim()
+      const nombreColabRaw = fila['Colab '] || fila['Colaborador'] || ''
+      const nombreColab = limpiarNombre(nombreColabRaw) || ''
       const correoRaw = (fila['Correo'] || '').toString().trim().toLowerCase()
       const horasFila = Number(fila['Horas capacitación']) || 0
       const generoFila = limpiarGenero(fila['Género'])
@@ -209,6 +216,7 @@ export default function ImportarCapacitaciones() {
         horas: horasFila,
         genero: generoFila,
         costo: costoFila,
+        nombre_colab: nombreColab || null,
       })
     }
 
@@ -247,29 +255,16 @@ export default function ImportarCapacitaciones() {
 
       <div style={{ border: '2px dashed #CBD5E1', borderRadius: '12px', padding: '32px', textAlign: 'center', background: 'white', marginBottom: '20px' }}>
         <div style={{ fontSize: '36px', marginBottom: '10px' }}>📊</div>
-        <div style={{ fontSize: '15px', fontWeight: '500', marginBottom: '6px' }}>
-          Seleccioná tu Excel de capacitaciones
-        </div>
-        <div style={{ fontSize: '12px', color: '#94A3B8', marginBottom: '16px' }}>
-          Compatible con cualquier nombre de hoja
-        </div>
-        <input
-          type="file"
-          accept=".xlsx,.xls"
-          onChange={procesarArchivo}
-          disabled={estado === 'procesando'}
-          style={{ display: 'none' }}
-          id="fileCapInput"
-        />
-        <label
-          htmlFor="fileCapInput"
-          style={{
-            background: estado === 'procesando' ? '#E2E8F0' : '#8131B0',
-            color: estado === 'procesando' ? '#94A3B8' : 'white',
-            padding: '10px 24px', borderRadius: '8px',
-            cursor: estado === 'procesando' ? 'not-allowed' : 'pointer',
-            fontSize: '13px', fontWeight: '500'
-          }}>
+        <div style={{ fontSize: '15px', fontWeight: '500', marginBottom: '6px' }}>Seleccioná tu Excel de capacitaciones</div>
+        <div style={{ fontSize: '12px', color: '#94A3B8', marginBottom: '16px' }}>Compatible con cualquier nombre de hoja</div>
+        <input type="file" accept=".xlsx,.xls" onChange={procesarArchivo} disabled={estado === 'procesando'} style={{ display: 'none' }} id="fileCapInput" />
+        <label htmlFor="fileCapInput" style={{
+          background: estado === 'procesando' ? '#E2E8F0' : '#8131B0',
+          color: estado === 'procesando' ? '#94A3B8' : 'white',
+          padding: '10px 24px', borderRadius: '8px',
+          cursor: estado === 'procesando' ? 'not-allowed' : 'pointer',
+          fontSize: '13px', fontWeight: '500'
+        }}>
           {estado === 'procesando' ? '⏳ Procesando...' : 'Elegir archivo Excel'}
         </label>
       </div>
@@ -298,15 +293,9 @@ export default function ImportarCapacitaciones() {
       )}
 
       <div style={{ marginTop: '20px', background: 'white', borderRadius: '12px', padding: '18px', border: '1px solid #E2E8F0' }}>
-        <div style={{ fontSize: '13px', fontWeight: '600', marginBottom: '10px', color: '#374151' }}>
-          Columnas requeridas en el Excel:
-        </div>
+        <div style={{ fontSize: '13px', fontWeight: '600', marginBottom: '10px', color: '#374151' }}>Columnas requeridas en el Excel:</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px' }}>
-          {[
-            'Nombre Capacitación *', 'Des_Temas', 'Fecha Inicio', 'Fecha fin',
-            'Horas capacitación *', 'Estado', 'Empresa', 'Facilitador',
-            'Correo (opcional)', 'Costo', 'Género', 'Gerencia'
-          ].map(c => (
+          {['Nombre Capacitación *', 'Des_Temas', 'Fecha Inicio', 'Fecha fin', 'Horas capacitación *', 'Estado', 'Empresa', 'Facilitador', 'Correo (opcional)', 'Costo', 'Género', 'Colab'].map(c => (
             <div key={c} style={{ fontSize: '12px', color: '#64748B', display: 'flex', alignItems: 'center', gap: '5px' }}>
               <span style={{ color: c.includes('*') ? '#0F9B72' : '#CBD5E1' }}>●</span>{c}
             </div>
