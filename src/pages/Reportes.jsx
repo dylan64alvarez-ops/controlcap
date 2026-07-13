@@ -87,17 +87,20 @@ export default function Reportes() {
   async function obtenerDatosFiltrados() {
     const hayFiltrosCap = filtroAnio || filtroProveedor || filtroCap
 
-    // Cargar capacitaciones
-    let qCap = supabase.from('capacitaciones').select('*')
-    if (filtroAnio) qCap = qCap.gte('fecha_inicio', `${filtroAnio}-01-01`).lte('fecha_inicio', `${filtroAnio}-12-31`)
-    if (filtroCap) qCap = qCap.eq('id', filtroCap)
-    if (filtroProveedor) qCap = qCap.eq('proveedor', filtroProveedor)
-    const { data: caps } = await qCap
+    // Siempre cargar TODAS las capacitaciones para lookup
+    const { data: todasLasCaps } = await supabase.from('capacitaciones').select('*')
+    const capsLookup = todasLasCaps || []
 
-    const capIds = (caps || []).map(c => c.id)
+    // Capacitaciones filtradas para determinar qué participantes incluir
+    let capsParaFiltro = capsLookup
+    if (filtroAnio) capsParaFiltro = capsParaFiltro.filter(c => c.fecha_inicio && c.fecha_inicio.startsWith(filtroAnio))
+    if (filtroProveedor) capsParaFiltro = capsParaFiltro.filter(c => c.proveedor === filtroProveedor)
+    if (filtroCap) capsParaFiltro = capsParaFiltro.filter(c => c.id === filtroCap)
+
+    const capIds = capsParaFiltro.map(c => c.id)
 
     // Si hay filtros de cap pero no hay resultados, retornar vacío
-    if (hayFiltrosCap && capIds.length === 0) return { caps: [], parts: [], cols: [] }
+    if (hayFiltrosCap && capIds.length === 0) return { caps: capsParaFiltro, parts: [], cols: [] }
 
     // Cargar colaboradores
     const { data: cols } = await supabase.from('colaboradores').select('*')
@@ -109,49 +112,58 @@ export default function Reportes() {
     })
 
     // Cargar participantes
-    let qPart = supabase.from('participantes').select('*')
+    let partsRaw = []
 
     if (hayFiltrosCap && capIds.length > 0) {
-      // Si hay muchos IDs, dividir en lotes
-      if (capIds.length > 400) {
-        const lotes = []
-        for (let i = 0; i < capIds.length; i += 400) {
-          const lote = capIds.slice(i, i + 400)
-          let qLote = supabase.from('participantes').select('*').in('capacitacion_id', lote)
-          if (filtroColab) qLote = qLote.eq('correo', filtroColab)
-          const { data: pLote } = await qLote
-          if (pLote) lotes.push(...pLote)
-        }
-        let parts = lotes.map(p => {
-          const cap = (caps || []).find(c => c.id === p.capacitacion_id)
-          const col = colById[p.colaborador_id] || colByCorreo[p.correo?.toLowerCase().trim()] || colByNombre[p.nombre_colab?.toUpperCase().trim()] || null
-          const correoResuelto = col?.correo || (p.correo && !p.correo.startsWith('sin-correo__') ? p.correo : null) || null
-          return { ...p, _cap: cap, _col: col, _nombre: col?.nombre || p.nombre_colab || '—', _correo: correoResuelto || '—', _gerencia: col?.gerencia || p.gerencia_colab || '—', _departamento: col?.departamento || p.departamento_colab || '—', _puesto: col?.puesto || p.puesto_colab || '—' }
-        })
-        if (filtroGerencia) parts = parts.filter(p => p._gerencia === filtroGerencia)
-        if (filtroDep) parts = parts.filter(p => p._departamento === filtroDep)
-        return { caps: caps || [], parts, cols: cols || [] }
+      // Dividir en lotes de 400 para evitar límites de Supabase
+      for (let i = 0; i < capIds.length; i += 400) {
+        const lote = capIds.slice(i, i + 400)
+        let qLote = supabase.from('participantes').select('*').in('capacitacion_id', lote)
+        if (filtroColab) qLote = qLote.eq('correo', filtroColab)
+        const { data: pLote } = await qLote
+        if (pLote) partsRaw.push(...pLote)
       }
-      qPart = qPart.in('capacitacion_id', capIds)
-    } else if (!hayFiltrosCap) {
-      // Sin filtros de capacitación: limitar resultados
-      qPart = qPart.limit(5000)
+    } else {
+      // Sin filtros de cap: traer todos paginado
+      let desde = 0
+      const porPagina = 1000
+      while (true) {
+        let qPage = supabase
+          .from('participantes')
+          .select('*')
+          .range(desde, desde + porPagina - 1)
+        if (filtroColab) qPage = qPage.eq('correo', filtroColab)
+        const { data: pagina } = await qPage
+        if (!pagina || pagina.length === 0) break
+        partsRaw.push(...pagina)
+        if (pagina.length < porPagina) break
+        desde += porPagina
+      }
     }
 
-    if (filtroColab) qPart = qPart.eq('correo', filtroColab)
-    const { data: partsRaw } = await qPart
-
-    let parts = (partsRaw || []).map(p => {
-      const cap = (caps || []).find(c => c.id === p.capacitacion_id)
-      const col = colById[p.colaborador_id] || colByCorreo[p.correo?.toLowerCase().trim()] || colByNombre[p.nombre_colab?.toUpperCase().trim()] || null
-      const correoResuelto = col?.correo || (p.correo && !p.correo.startsWith('sin-correo__') ? p.correo : null) || null
-      return { ...p, _cap: cap, _col: col, _nombre: col?.nombre || p.nombre_colab || '—', _correo: correoResuelto || '—', _gerencia: col?.gerencia || p.gerencia_colab || '—', _departamento: col?.departamento || p.departamento_colab || '—', _puesto: col?.puesto || p.puesto_colab || '—' }
+    // Enriquecer participantes
+    let parts = partsRaw.map(p => {
+      const cap = capsLookup.find(c => c.id === p.capacitacion_id)
+      const col = colById[p.colaborador_id] ||
+        colByCorreo[p.correo?.toLowerCase().trim()] ||
+        colByNombre[p.nombre_colab?.toUpperCase().trim()] ||
+        null
+      const correoResuelto = col?.correo ||
+        (p.correo && !p.correo.startsWith('sin-correo__') ? p.correo : null) || null
+      return {
+        ...p, _cap: cap, _col: col,
+        _nombre: col?.nombre || p.nombre_colab || '—',
+        _correo: correoResuelto || '—',
+        _gerencia: col?.gerencia || p.gerencia_colab || '—',
+        _departamento: col?.departamento || p.departamento_colab || '—',
+        _puesto: col?.puesto || p.puesto_colab || '—',
+      }
     })
 
     if (filtroGerencia) parts = parts.filter(p => p._gerencia === filtroGerencia)
     if (filtroDep) parts = parts.filter(p => p._departamento === filtroDep)
 
-    return { caps: caps || [], parts, cols: cols || [] }
+    return { caps: capsParaFiltro, parts, cols: cols || [] }
   }
 
   async function cargarPreview() {
@@ -298,7 +310,7 @@ export default function Reportes() {
   async function generarExcel() {
     setGenerando('excel')
     try {
-      const { caps, parts, cols } = await obtenerDatosFiltrados()
+      const { caps, parts } = await obtenerDatosFiltrados()
       const wb = XLSX.utils.book_new()
 
       if (!filtroColab) {
@@ -364,7 +376,6 @@ export default function Reportes() {
       const totalHoras = parts.reduce((s, p) => s + Number(p.horas || 0), 0)
       const totalCosto = parts.reduce((s, p) => s + Number(p.costo || 0), 0)
       const capsUnicas = new Set(parts.map(p => p.capacitacion_id)).size
-
       const porGerencia = {}
       parts.forEach(p => {
         const g = p._gerencia || 'Sin gerencia'
@@ -415,7 +426,7 @@ export default function Reportes() {
         s2.addText(k.val, { x:x+0.2, y:2.05, w:2.6, h:0.8, fontSize:24, bold:true, color:k.color, fontFace:'Arial' })
       })
 
-      // Slide 3: Por gerencia (si no es reporte por colaborador)
+      // Slide 3: Por gerencia
       if (!filtroColab && gerArr.length > 0) {
         const s3 = pptx.addSlide()
         s3.background = { color: WHITE }
@@ -432,7 +443,7 @@ export default function Reportes() {
         })
       }
 
-      // Slide 4: Perfil colaborador (si aplica)
+      // Slide 4: Perfil colaborador
       if (colabSeleccionado) {
         const s4 = pptx.addSlide()
         s4.background = { color: LIGHT }
@@ -441,11 +452,10 @@ export default function Reportes() {
         s4.addText(colabSeleccionado.nombre, { x:0.7, y:1.1, w:8, h:0.5, fontSize:18, bold:true, color:NAVY, fontFace:'Arial' })
         s4.addText(colabSeleccionado.gerencia||'—', { x:0.7, y:1.65, w:5, h:0.35, fontSize:13, color:GRAY, fontFace:'Arial' })
         s4.addText(colabSeleccionado.puesto||'—', { x:5.5, y:1.65, w:5, h:0.35, fontSize:13, color:GRAY, fontFace:'Arial' })
-
         const capCount = {}
         parts.forEach(p => {
           const id = p.capacitacion_id
-          if (!capCount[id]) capCount[id] = { nombre: p._cap?.nombre||'—', horas:0, costo:0 }
+          if (!capCount[id]) capCount[id] = { nombre:p._cap?.nombre||'—', horas:0, costo:0 }
           capCount[id].horas += Number(p.horas||0)
           capCount[id].costo += Number(p.costo||0)
         })
@@ -532,7 +542,7 @@ export default function Reportes() {
           <div style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
             <label style={{ fontSize:'10px', color:'#94A3B8', fontWeight:'600', textTransform:'uppercase' }}>Año</label>
             <select value={filtroAnio} onChange={e => { setFiltroAnio(e.target.value); setFiltroCap('') }} style={{ ...inp, width:'120px' }}>
-              <option value="">Todos</option>
+              <option value="">Todos los años</option>
               {ANIOS.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
           </div>
@@ -579,7 +589,7 @@ export default function Reportes() {
                 placeholder="Buscar colaborador..."
                 value={busquedaColab}
                 onChange={e => { setBusquedaColab(e.target.value); if (colabSeleccionado) limpiarColab() }}
-                style={{ ...inp, width:'220px', paddingRight: colabSeleccionado ? '28px' : '10px' }}
+                style={{ ...inp, width:'220px', paddingRight:colabSeleccionado?'28px':'10px' }}
               />
               {colabSeleccionado && (
                 <button onClick={limpiarColab}
@@ -587,9 +597,9 @@ export default function Reportes() {
               )}
               {resultadosColab.length > 0 && (
                 <div style={{ position:'absolute', top:'40px', left:0, width:'280px', background:'white', border:'1px solid #E2E8F0', borderRadius:'8px', boxShadow:'0 4px 12px rgba(0,0,0,0.1)', zIndex:50, maxHeight:'200px', overflowY:'auto' }}>
-                  {resultadosColab.map((c, i) => (
+                  {resultadosColab.map((c,i) => (
                     <div key={c.id} onClick={() => seleccionarColab(c)}
-                      style={{ padding:'8px 12px', cursor:'pointer', fontSize:'12px', borderBottom: i < resultadosColab.length-1 ? '1px solid #F1F5F9' : 'none' }}
+                      style={{ padding:'8px 12px', cursor:'pointer', fontSize:'12px', borderBottom:i<resultadosColab.length-1?'1px solid #F1F5F9':'none' }}
                       onMouseEnter={e => e.currentTarget.style.background='#F8FAFC'}
                       onMouseLeave={e => e.currentTarget.style.background='white'}>
                       <div style={{ fontWeight:'500', color:'#1E293B' }}>{c.nombre}</div>
