@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
@@ -57,32 +57,75 @@ export default function Participantes({ onCambio }) {
     setColByIdMap(cById)
     setColByCorreoMap(cByCorreo)
 
-    await cargarParticipantes(0, '2026', cMap, cById, cByCorreo, caps)
+    await buscarConFiltros(0, '2026', '', '', cMap, cById, cByCorreo, caps, true)
     setCargadoInicial(true)
     setCargando(false)
   }
 
-  async function cargarParticipantes(pag, anio, cMapRef, cByIdRef, cByCorreoRef, capsRef) {
-    const anioActual = anio === undefined ? filtroAnio : anio
-    const capsDisp = capsRef || capacitaciones
-    const cMapDisp = cMapRef || capMap
-    const cByIdDisp = cByIdRef || colByIdMap
-    const cByCorreoDisp = cByCorreoRef || colByCorreoMap
+  async function buscarConFiltros(pag, anio, cap, busq, cMapR, cByIdR, cByCorreoR, capsR, reset) {
+    const cMapU = cMapR || capMap
+    const cByIdU = cByIdR || colByIdMap
+    const cByCorreoU = cByCorreoR || colByCorreoMap
+    const capsU = capsR || capacitaciones
 
     const desde = pag * POR_PAGINA
     const hasta = desde + POR_PAGINA - 1
 
+    // Obtener IDs de capacitaciones del año
     let capIds = null
-    if (anioActual) {
-      const capsAnio = capsDisp.filter(c => {
-        if (!c.fecha_inicio) return false
-        return new Date(c.fecha_inicio).getFullYear() === parseInt(anioActual)
-      })
-      if (capsAnio.length === 0) {
-        if (pag === 0) { setParticipantes([]); setTotalCount(0) }
+    if (anio) {
+      const capsAnio = capsU.filter(c => c.fecha_inicio && new Date(c.fecha_inicio).getFullYear() === parseInt(anio))
+      if (capsAnio.length === 0 && !busq) {
+        setParticipantes([])
+        setTotalCount(0)
         return
       }
-      capIds = capsAnio.map(c => c.id)
+      if (capsAnio.length > 0) capIds = capsAnio.map(c => c.id)
+    }
+
+    // Búsqueda por texto
+    let correosEncontrados = null
+    if (busq && busq.trim().length > 0) {
+      const t = busq.toLowerCase().trim()
+
+      // Buscar en colaboradores locales por nombre, correo, gerencia, puesto
+      const colsMatch = Object.values(cByIdU).filter(c =>
+        c.nombre?.toLowerCase().includes(t) ||
+        c.correo?.toLowerCase().includes(t) ||
+        c.gerencia?.toLowerCase().includes(t) ||
+        c.puesto?.toLowerCase().includes(t)
+      )
+      correosEncontrados = colsMatch.map(c => c.correo?.toLowerCase().trim()).filter(Boolean)
+
+      // Buscar en nombre_colab directamente en Supabase
+      let qNombre = supabase
+        .from('participantes')
+        .select('correo')
+        .ilike('nombre_colab', `%${t}%`)
+      if (capIds) qNombre = qNombre.in('capacitacion_id', capIds)
+      const { data: pNombres } = await qNombre
+      if (pNombres) {
+        const extraCorreos = pNombres.map(p => p.correo?.toLowerCase().trim()).filter(Boolean)
+        correosEncontrados = [...new Set([...correosEncontrados, ...extraCorreos])]
+      }
+
+      // Buscar también por correo directo
+      let qCorreo = supabase
+        .from('participantes')
+        .select('correo')
+        .ilike('correo', `%${t}%`)
+      if (capIds) qCorreo = qCorreo.in('capacitacion_id', capIds)
+      const { data: pCorreos } = await qCorreo
+      if (pCorreos) {
+        const extras = pCorreos.map(p => p.correo?.toLowerCase().trim()).filter(Boolean)
+        correosEncontrados = [...new Set([...correosEncontrados, ...extras])]
+      }
+
+      if (correosEncontrados.length === 0) {
+        setParticipantes([])
+        setTotalCount(0)
+        return
+      }
     }
 
     let q = supabase
@@ -92,43 +135,36 @@ export default function Participantes({ onCambio }) {
       .range(desde, hasta)
 
     if (capIds) q = q.in('capacitacion_id', capIds)
-    if (filtroCap) q = q.eq('capacitacion_id', filtroCap)
+    if (cap) q = q.eq('capacitacion_id', cap)
+    if (correosEncontrados) q = q.in('correo', correosEncontrados)
 
     const { data, count } = await q
 
     const enriquecidos = (data || []).map(p => {
-      const cap = cMapDisp[p.capacitacion_id] || null
-      const col = cByIdDisp[p.colaborador_id] || cByCorreoDisp[p.correo?.toLowerCase().trim()] || null
-      const anioP = cap?.fecha_inicio ? new Date(cap.fecha_inicio).getFullYear() : null
-      return { ...p, _cap: cap, _col: col, _anio: anioP }
+      const c = cMapU[p.capacitacion_id] || null
+      const col = cByIdU[p.colaborador_id] || cByCorreoU[p.correo?.toLowerCase().trim()] || null
+      return { ...p, _cap: c, _col: col, _anio: c?.fecha_inicio ? new Date(c.fecha_inicio).getFullYear() : null }
     })
 
-    if (pag === 0) {
+    if (reset || pag === 0) {
       setParticipantes(enriquecidos)
     } else {
       setParticipantes(prev => [...prev, ...enriquecidos])
     }
     setTotalCount(count || 0)
+    setPaginaActual(pag)
   }
 
+  // Debounce para búsqueda
   useEffect(() => {
     if (!cargadoInicial) return
-    setCargando(true)
-    setPaginaActual(0)
-    cargarParticipantes(0, filtroAnio, null, null, null, null).then(() => setCargando(false))
-  }, [filtroAnio, filtroCap])
-
-  // Filtro client-side por búsqueda
-  const filtrados = participantes.filter(p => {
-    if (!busqueda) return true
-    const t = busqueda.toLowerCase()
-    const nombre = (p._col?.nombre || p.nombre_colab || '').toLowerCase()
-    const correo = (p.correo || '').toLowerCase()
-    const cap = (p._cap?.nombre || '').toLowerCase()
-    const gerencia = (p._col?.gerencia || '').toLowerCase()
-    const puesto = (p._col?.puesto || '').toLowerCase()
-    return nombre.includes(t) || correo.includes(t) || cap.includes(t) || gerencia.includes(t) || puesto.includes(t)
-  })
+    const timer = setTimeout(() => {
+      setCargando(true)
+      buscarConFiltros(0, filtroAnio, filtroCap, busqueda, null, null, null, null, true)
+        .then(() => setCargando(false))
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [busqueda, filtroAnio, filtroCap, cargadoInicial])
 
   useEffect(() => {
     if (!busquedaColab) { setResultados([]); return }
@@ -142,10 +178,9 @@ export default function Participantes({ onCambio }) {
   }, [busquedaColab, colaboradores])
 
   async function cargarMas() {
-    const nuevaPagina = paginaActual + 1
-    setPaginaActual(nuevaPagina)
+    const nueva = paginaActual + 1
     setCargando(true)
-    await cargarParticipantes(nuevaPagina, filtroAnio, null, null, null, null)
+    await buscarConFiltros(nueva, filtroAnio, filtroCap, busqueda, null, null, null, null, false)
     setCargando(false)
   }
 
@@ -167,7 +202,7 @@ export default function Participantes({ onCambio }) {
       setBusquedaColab('')
       setResultados([])
       setCargando(true)
-      await cargarParticipantes(0, filtroAnio, null, null, null, null)
+      await buscarConFiltros(0, filtroAnio, filtroCap, busqueda, null, null, null, null, true)
       setCargando(false)
       if (onCambio) onCambio()
       setTimeout(() => setExito(''), 3000)
@@ -192,9 +227,7 @@ export default function Participantes({ onCambio }) {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <div style={{ fontSize: '13px', color: '#64748B' }}>
-          {cargando
-            ? 'Cargando...'
-            : `${filtrados.length} de ${totalCount.toLocaleString()} participantes`}
+          {cargando ? 'Buscando...' : `${participantes.length} de ${totalCount.toLocaleString()} participantes`}
         </div>
         <button onClick={() => setModal(true)}
           style={{ background: '#8131B0', color: 'white', border: 'none', padding: '8px 18px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>
@@ -235,7 +268,7 @@ export default function Participantes({ onCambio }) {
       <div style={{ background: 'white', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', overflow: 'hidden' }}>
         {cargando && participantes.length === 0 ? (
           <div style={{ padding: '40px', textAlign: 'center', color: '#94A3B8' }}>Cargando participantes...</div>
-        ) : filtrados.length === 0 ? (
+        ) : participantes.length === 0 ? (
           <div style={{ padding: '50px', textAlign: 'center', color: '#94A3B8' }}>
             <div style={{ fontSize: '32px', marginBottom: '10px' }}>👥</div>
             <div style={{ fontWeight: '500', marginBottom: '6px' }}>No hay participantes</div>
@@ -252,7 +285,7 @@ export default function Participantes({ onCambio }) {
                 </tr>
               </thead>
               <tbody>
-                {filtrados.map((p, i) => {
+                {participantes.map((p, i) => {
                   const correoMostrar = (!p.correo || p.correo.startsWith('sin-correo__')) ? '—' : p.correo
                   const nombreMostrar = p._col?.nombre || p.nombre_colab || '—'
                   return (
@@ -272,7 +305,7 @@ export default function Participantes({ onCambio }) {
                 })}
               </tbody>
             </table>
-            {participantes.length < totalCount && !busqueda && (
+            {participantes.length < totalCount && (
               <div style={{ padding: '16px', textAlign: 'center', borderTop: '1px solid #E2E8F0' }}>
                 <button onClick={cargarMas} disabled={cargando}
                   style={{ background: '#8131B0', color: 'white', border: 'none', padding: '8px 24px', borderRadius: '8px', cursor: cargando ? 'not-allowed' : 'pointer', fontSize: '13px' }}>
