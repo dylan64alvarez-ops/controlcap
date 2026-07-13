@@ -17,6 +17,7 @@ export default function Participantes({ onCambio }) {
   const [capMap, setCapMap] = useState({})
   const [colByIdMap, setColByIdMap] = useState({})
   const [colByCorreoMap, setColByCorreoMap] = useState({})
+  const [colByNombreMap, setColByNombreMap] = useState({})
   const [modal, setModal] = useState(false)
   const [busquedaColab, setBusquedaColab] = useState('')
   const [resultados, setResultados] = useState([])
@@ -45,10 +46,11 @@ export default function Participantes({ onCambio }) {
     const cMap = {}
     caps.forEach(c => { cMap[c.id] = c })
 
-    const cById = {}, cByCorreo = {}
+    const cById = {}, cByCorreo = {}, cByNombre = {}
     cols.forEach(c => {
       cById[c.id] = c
       if (c.correo) cByCorreo[c.correo.toLowerCase().trim()] = c
+      if (c.nombre) cByNombre[c.nombre.toUpperCase().trim()] = c
     })
 
     setCapacitaciones(caps)
@@ -56,16 +58,18 @@ export default function Participantes({ onCambio }) {
     setCapMap(cMap)
     setColByIdMap(cById)
     setColByCorreoMap(cByCorreo)
+    setColByNombreMap(cByNombre)
 
-    await buscarConFiltros(0, '2026', '', '', cMap, cById, cByCorreo, caps, true)
+    await buscarConFiltros(0, '2026', '', '', cMap, cById, cByCorreo, cByNombre, caps, true)
     setCargadoInicial(true)
     setCargando(false)
   }
 
-  async function buscarConFiltros(pag, anio, cap, busq, cMapR, cByIdR, cByCorreoR, capsR, reset) {
+  async function buscarConFiltros(pag, anio, cap, busq, cMapR, cByIdR, cByCorreoR, cByNombreR, capsR, reset) {
     const cMapU = cMapR || capMap
     const cByIdU = cByIdR || colByIdMap
     const cByCorreoU = cByCorreoR || colByCorreoMap
+    const cByNombreU = cByNombreR || colByNombreMap
     const capsU = capsR || capacitaciones
 
     const desde = pag * POR_PAGINA
@@ -87,7 +91,6 @@ export default function Participantes({ onCambio }) {
     if (busq && busq.trim().length > 0) {
       const t = busq.toLowerCase().trim()
 
-      // Buscar en colaboradores locales
       const colsMatch = Object.values(cByIdU).filter(c =>
         c.nombre?.toLowerCase().includes(t) ||
         c.correo?.toLowerCase().includes(t) ||
@@ -144,14 +147,30 @@ export default function Participantes({ onCambio }) {
 
     const enriquecidos = (data || []).map(p => {
       const c = cMapU[p.capacitacion_id] || null
-      const col = cByIdU[p.colaborador_id] || cByCorreoU[p.correo?.toLowerCase().trim()] || null
+
+      // Buscar colaborador por ID, correo o nombre
+      const colPorId = cByIdU[p.colaborador_id]
+      const colPorCorreo = p.correo && !p.correo.startsWith('sin-correo__')
+        ? cByCorreoU[p.correo.toLowerCase().trim()]
+        : null
+      const colPorNombre = p.nombre_colab
+        ? cByNombreU[p.nombre_colab.toUpperCase().trim()]
+        : null
+
+      const col = colPorId || colPorCorreo || colPorNombre || null
+
+      // Resolver correo: primero del colaborador activo, luego del registro, luego del match por nombre
+      const correoResuelto = col?.correo ||
+        (p.correo && !p.correo.startsWith('sin-correo__') ? p.correo : null) ||
+        null
+
       return {
         ...p,
         _cap: c,
         _col: col,
         _anio: c?.fecha_inicio ? new Date(c.fecha_inicio).getFullYear() : null,
-        // Usar datos del colaborador activo primero, luego del Excel
         _nombre: col?.nombre || p.nombre_colab || '—',
+        _correo: correoResuelto || '—',
         _gerencia: col?.gerencia || p.gerencia_colab || '—',
         _departamento: col?.departamento || p.departamento_colab || '—',
         _puesto: col?.puesto || p.puesto_colab || '—',
@@ -171,7 +190,7 @@ export default function Participantes({ onCambio }) {
     if (!cargadoInicial) return
     const timer = setTimeout(() => {
       setCargando(true)
-      buscarConFiltros(0, filtroAnio, filtroCap, busqueda, null, null, null, null, true)
+      buscarConFiltros(0, filtroAnio, filtroCap, busqueda, null, null, null, null, null, true)
         .then(() => setCargando(false))
     }, 400)
     return () => clearTimeout(timer)
@@ -191,7 +210,7 @@ export default function Participantes({ onCambio }) {
   async function cargarMas() {
     const nueva = paginaActual + 1
     setCargando(true)
-    await buscarConFiltros(nueva, filtroAnio, filtroCap, busqueda, null, null, null, null, false)
+    await buscarConFiltros(nueva, filtroAnio, filtroCap, busqueda, null, null, null, null, null, false)
     setCargando(false)
   }
 
@@ -216,7 +235,7 @@ export default function Participantes({ onCambio }) {
       setBusquedaColab('')
       setResultados([])
       setCargando(true)
-      await buscarConFiltros(0, filtroAnio, filtroCap, busqueda, null, null, null, null, true)
+      await buscarConFiltros(0, filtroAnio, filtroCap, busqueda, null, null, null, null, null, true)
       setCargando(false)
       if (onCambio) onCambio()
       setTimeout(() => setExito(''), 3000)
@@ -297,23 +316,20 @@ export default function Participantes({ onCambio }) {
                 </tr>
               </thead>
               <tbody>
-                {participantes.map((p, i) => {
-                  const correoMostrar = (!p.correo || p.correo.startsWith('sin-correo__')) ? '—' : p.correo
-                  return (
-                    <tr key={p.id} style={{ background: i % 2 === 0 ? 'white' : '#FAFAFA' }}>
-                      <td style={{ padding: '10px 12px', fontWeight: '500', fontSize: '13px', whiteSpace: 'nowrap' }}>{p._nombre}</td>
-                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#0072DA' }}>{correoMostrar}</td>
-                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{p._gerencia}</td>
-                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p._puesto}</td>
-                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#374151', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p._cap?.nombre || '—'}</td>
-                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{p._anio || '—'}</td>
-                      <td style={{ padding: '10px 12px', fontSize: '13px', fontWeight: '600', color: '#0F9B72' }}>{p.horas || 0}h</td>
-                      <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>
-                        {p.genero === 'FEMENINO' ? '♀ F' : p.genero === 'MASCULINO' ? '♂ M' : '—'}
-                      </td>
-                    </tr>
-                  )
-                })}
+                {participantes.map((p, i) => (
+                  <tr key={p.id} style={{ background: i % 2 === 0 ? 'white' : '#FAFAFA' }}>
+                    <td style={{ padding: '10px 12px', fontWeight: '500', fontSize: '13px', whiteSpace: 'nowrap' }}>{p._nombre}</td>
+                    <td style={{ padding: '10px 12px', fontSize: '12px', color: '#0072DA' }}>{p._correo}</td>
+                    <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{p._gerencia}</td>
+                    <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p._puesto}</td>
+                    <td style={{ padding: '10px 12px', fontSize: '12px', color: '#374151', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p._cap?.nombre || '—'}</td>
+                    <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>{p._anio || '—'}</td>
+                    <td style={{ padding: '10px 12px', fontSize: '13px', fontWeight: '600', color: '#0F9B72' }}>{p.horas || 0}h</td>
+                    <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>
+                      {p.genero === 'FEMENINO' ? '♀ F' : p.genero === 'MASCULINO' ? '♂ M' : '—'}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
             {participantes.length < totalCount && (
