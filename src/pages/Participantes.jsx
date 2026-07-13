@@ -14,6 +14,7 @@ export default function Participantes({ onCambio }) {
   const [totalCount, setTotalCount] = useState(0)
   const [capacitaciones, setCapacitaciones] = useState([])
   const [colaboradores, setColaboradores] = useState([])
+  const [proveedores, setProveedores] = useState([])
   const [capMap, setCapMap] = useState({})
   const [colByIdMap, setColByIdMap] = useState({})
   const [colByCorreoMap, setColByCorreoMap] = useState({})
@@ -26,6 +27,7 @@ export default function Participantes({ onCambio }) {
   const [exito, setExito] = useState('')
   const [filtroCap, setFiltroCap] = useState('')
   const [filtroAnio, setFiltroAnio] = useState('2026')
+  const [filtroProveedor, setFiltroProveedor] = useState('')
   const [busqueda, setBusqueda] = useState('')
   const [cargando, setCargando] = useState(true)
   const [cargadoInicial, setCargadoInicial] = useState(false)
@@ -53,19 +55,23 @@ export default function Participantes({ onCambio }) {
       if (c.nombre) cByNombre[c.nombre.toUpperCase().trim()] = c
     })
 
+    // Extraer proveedores únicos
+    const provsUnicas = [...new Set(caps.map(c => c.proveedor).filter(Boolean))].sort()
+
     setCapacitaciones(caps)
     setColaboradores(cols)
+    setProveedores(provsUnicas)
     setCapMap(cMap)
     setColByIdMap(cById)
     setColByCorreoMap(cByCorreo)
     setColByNombreMap(cByNombre)
 
-    await buscarConFiltros(0, '2026', '', '', cMap, cById, cByCorreo, cByNombre, caps, true)
+    await buscarConFiltros(0, '2026', '', '', '', cMap, cById, cByCorreo, cByNombre, caps, true)
     setCargadoInicial(true)
     setCargando(false)
   }
 
-  async function buscarConFiltros(pag, anio, cap, busq, cMapR, cByIdR, cByCorreoR, cByNombreR, capsR, reset) {
+  async function buscarConFiltros(pag, anio, cap, prov, busq, cMapR, cByIdR, cByCorreoR, cByNombreR, capsR, reset) {
     const cMapU = cMapR || capMap
     const cByIdU = cByIdR || colByIdMap
     const cByCorreoU = cByCorreoR || colByCorreoMap
@@ -75,17 +81,23 @@ export default function Participantes({ onCambio }) {
     const desde = pag * POR_PAGINA
     const hasta = desde + POR_PAGINA - 1
 
+    // Filtrar capacitaciones por año y proveedor
     let capIds = null
+    let capsFiltered = capsU
     if (anio) {
-      const capsAnio = capsU.filter(c => c.fecha_inicio && new Date(c.fecha_inicio).getFullYear() === parseInt(anio))
-      if (capsAnio.length === 0 && !busq) {
-        setParticipantes([])
-        setTotalCount(0)
-        return
-      }
-      if (capsAnio.length > 0) capIds = capsAnio.map(c => c.id)
+      capsFiltered = capsFiltered.filter(c => c.fecha_inicio && new Date(c.fecha_inicio).getFullYear() === parseInt(anio))
     }
+    if (prov) {
+      capsFiltered = capsFiltered.filter(c => c.proveedor === prov)
+    }
+    if ((anio || prov) && capsFiltered.length === 0 && !busq) {
+      setParticipantes([])
+      setTotalCount(0)
+      return
+    }
+    if (capsFiltered.length > 0) capIds = capsFiltered.map(c => c.id)
 
+    // Búsqueda en servidor
     let correosEncontrados = null
     if (busq && busq.trim().length > 0) {
       const t = busq.toLowerCase().trim()
@@ -182,11 +194,11 @@ export default function Participantes({ onCambio }) {
     if (!cargadoInicial) return
     const timer = setTimeout(() => {
       setCargando(true)
-      buscarConFiltros(0, filtroAnio, filtroCap, busqueda, null, null, null, null, null, true)
+      buscarConFiltros(0, filtroAnio, filtroCap, filtroProveedor, busqueda, null, null, null, null, null, true)
         .then(() => setCargando(false))
     }, 400)
     return () => clearTimeout(timer)
-  }, [busqueda, filtroAnio, filtroCap, cargadoInicial])
+  }, [busqueda, filtroAnio, filtroCap, filtroProveedor, cargadoInicial])
 
   useEffect(() => {
     if (!busquedaColab) { setResultados([]); return }
@@ -202,7 +214,7 @@ export default function Participantes({ onCambio }) {
   async function cargarMas() {
     const nueva = paginaActual + 1
     setCargando(true)
-    await buscarConFiltros(nueva, filtroAnio, filtroCap, busqueda, null, null, null, null, null, false)
+    await buscarConFiltros(nueva, filtroAnio, filtroCap, filtroProveedor, busqueda, null, null, null, null, null, false)
     setCargando(false)
   }
 
@@ -227,7 +239,7 @@ export default function Participantes({ onCambio }) {
       setBusquedaColab('')
       setResultados([])
       setCargando(true)
-      await buscarConFiltros(0, filtroAnio, filtroCap, busqueda, null, null, null, null, null, true)
+      await buscarConFiltros(0, filtroAnio, filtroCap, filtroProveedor, busqueda, null, null, null, null, null, true)
       setCargando(false)
       if (onCambio) onCambio()
       setTimeout(() => setExito(''), 3000)
@@ -236,6 +248,13 @@ export default function Participantes({ onCambio }) {
     }
     setGuardando(false)
   }
+
+  // Capacitaciones filtradas por año y proveedor para el selector
+  const capsFiltradasSelector = capacitaciones
+    .filter(c => !filtroAnio || (c.fecha_inicio && new Date(c.fecha_inicio).getFullYear() === parseInt(filtroAnio)))
+    .filter(c => !filtroProveedor || c.proveedor === filtroProveedor)
+
+  const hayFiltros = filtroCap || busqueda || filtroProveedor
 
   const inp = {
     height: '36px', border: '1px solid #E2E8F0', borderRadius: '8px',
@@ -260,34 +279,39 @@ export default function Participantes({ onCambio }) {
         </button>
       </div>
 
+      {/* Filtros */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
         <input
           type="text"
-          placeholder="🔍 Nombre, correo, capacitación, gerencia o puesto..."
+          placeholder="🔍 Nombre, correo, capacitación, gerencia..."
           value={busqueda}
           onChange={e => setBusqueda(e.target.value)}
-          style={{ ...inp, width: '300px' }}
+          style={{ ...inp, width: '260px' }}
         />
         <select value={filtroAnio} onChange={e => { setFiltroAnio(e.target.value); setFiltroCap('') }}
-          style={{ ...inp, width: '120px' }}>
+          style={{ ...inp, width: '110px' }}>
           <option value="">Todos los años</option>
           {ANIOS.map(a => <option key={a} value={a}>{a}</option>)}
         </select>
-        <select value={filtroCap} onChange={e => setFiltroCap(e.target.value)}
-          style={{ ...inp, width: '300px' }}>
-          <option value="">Todas las capacitaciones</option>
-          {capacitaciones
-            .filter(c => !filtroAnio || (c.fecha_inicio && new Date(c.fecha_inicio).getFullYear() === parseInt(filtroAnio)))
-            .map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+        <select value={filtroProveedor} onChange={e => { setFiltroProveedor(e.target.value); setFiltroCap('') }}
+          style={{ ...inp, width: '200px' }}>
+          <option value="">Todos los proveedores</option>
+          {proveedores.map(p => <option key={p} value={p}>{p}</option>)}
         </select>
-        {(filtroCap || busqueda) && (
-          <button onClick={() => { setFiltroCap(''); setBusqueda('') }}
+        <select value={filtroCap} onChange={e => setFiltroCap(e.target.value)}
+          style={{ ...inp, width: '260px' }}>
+          <option value="">Todas las capacitaciones</option>
+          {capsFiltradasSelector.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+        </select>
+        {hayFiltros && (
+          <button onClick={() => { setFiltroCap(''); setBusqueda(''); setFiltroProveedor('') }}
             style={{ ...inp, width: 'auto', padding: '0 14px', cursor: 'pointer', color: '#64748B' }}>
             ✕ Limpiar
           </button>
         )}
       </div>
 
+      {/* Tabla */}
       <div style={{ background: 'white', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', overflow: 'hidden' }}>
         {cargando && participantes.length === 0 ? (
           <div style={{ padding: '40px', textAlign: 'center', color: '#94A3B8' }}>Cargando participantes...</div>
@@ -337,6 +361,7 @@ export default function Participantes({ onCambio }) {
         )}
       </div>
 
+      {/* Modal */}
       {modal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: 'white', borderRadius: '16px', width: '520px', maxWidth: '95vw', maxHeight: '90vh', overflow: 'auto' }}>
