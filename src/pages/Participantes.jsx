@@ -26,6 +26,9 @@ export default function Participantes({ onCambio }) {
   const [resultados, setResultados] = useState([])
   const [resultadosMasivos, setResultadosMasivos] = useState([])
   const [capSeleccionada, setCapSeleccionada] = useState('')
+  const [busquedaCap, setBusquedaCap] = useState('')
+  const [capSeleccionadaNombre, setCapSeleccionadaNombre] = useState('')
+  const [resultadosCap, setResultadosCap] = useState([])
   const [guardando, setGuardando] = useState(false)
   const [exito, setExito] = useState('')
   const [filtroCap, setFiltroCap] = useState('')
@@ -88,63 +91,39 @@ export default function Participantes({ onCambio }) {
       let capsFiltered = capsU
       if (anio) capsFiltered = capsFiltered.filter(c => c.fecha_inicio && new Date(c.fecha_inicio).getFullYear() === parseInt(anio))
       if (prov) capsFiltered = capsFiltered.filter(c => c.proveedor === prov)
-
-      if (capsFiltered.length === 0 && !busq) {
-        setParticipantes([])
-        setTotalCount(0)
-        return
-      }
+      if (capsFiltered.length === 0 && !busq) { setParticipantes([]); setTotalCount(0); return }
       if (capsFiltered.length > 0) capIds = capsFiltered.map(c => c.id)
     }
 
     let correosEncontrados = null
     if (busq && busq.trim().length > 0) {
       const t = busq.toLowerCase().trim()
-
       const colsMatch = Object.values(cByIdU).filter(c =>
-        c.nombre?.toLowerCase().includes(t) ||
-        c.correo?.toLowerCase().includes(t) ||
-        c.gerencia?.toLowerCase().includes(t) ||
-        c.puesto?.toLowerCase().includes(t)
+        c.nombre?.toLowerCase().includes(t) || c.correo?.toLowerCase().includes(t) ||
+        c.gerencia?.toLowerCase().includes(t) || c.puesto?.toLowerCase().includes(t)
       )
       correosEncontrados = colsMatch.map(c => c.correo?.toLowerCase().trim()).filter(Boolean)
 
       let qNombre = supabase.from('participantes').select('correo').ilike('nombre_colab', `%${t}%`)
       if (capIds) qNombre = qNombre.in('capacitacion_id', capIds)
       const { data: pNombres } = await qNombre
-      if (pNombres) {
-        const extras = pNombres.map(p => p.correo?.toLowerCase().trim()).filter(Boolean)
-        correosEncontrados = [...new Set([...correosEncontrados, ...extras])]
-      }
+      if (pNombres) correosEncontrados = [...new Set([...correosEncontrados, ...pNombres.map(p => p.correo?.toLowerCase().trim()).filter(Boolean)])]
 
       let qGer = supabase.from('participantes').select('correo').ilike('gerencia_colab', `%${t}%`)
       if (capIds) qGer = qGer.in('capacitacion_id', capIds)
       const { data: pGer } = await qGer
-      if (pGer) {
-        const extras = pGer.map(p => p.correo?.toLowerCase().trim()).filter(Boolean)
-        correosEncontrados = [...new Set([...correosEncontrados, ...extras])]
-      }
+      if (pGer) correosEncontrados = [...new Set([...correosEncontrados, ...pGer.map(p => p.correo?.toLowerCase().trim()).filter(Boolean)])]
 
       let qCorreo = supabase.from('participantes').select('correo').ilike('correo', `%${t}%`)
       if (capIds) qCorreo = qCorreo.in('capacitacion_id', capIds)
       const { data: pCorreos } = await qCorreo
-      if (pCorreos) {
-        const extras = pCorreos.map(p => p.correo?.toLowerCase().trim()).filter(Boolean)
-        correosEncontrados = [...new Set([...correosEncontrados, ...extras])]
-      }
+      if (pCorreos) correosEncontrados = [...new Set([...correosEncontrados, ...pCorreos.map(p => p.correo?.toLowerCase().trim()).filter(Boolean)])]
 
-      if (correosEncontrados.length === 0) {
-        setParticipantes([])
-        setTotalCount(0)
-        return
-      }
+      if (correosEncontrados.length === 0) { setParticipantes([]); setTotalCount(0); return }
     }
 
-    let q = supabase
-      .from('participantes')
-      .select('*', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(desde, hasta)
+    let q = supabase.from('participantes').select('*', { count: 'exact' })
+      .order('created_at', { ascending: false }).range(desde, hasta)
 
     if (capIds) q = q.in('capacitacion_id', capIds)
     if (cap) q = q.eq('capacitacion_id', cap)
@@ -154,17 +133,10 @@ export default function Participantes({ onCambio }) {
 
     const enriquecidos = (data || []).map(p => {
       const c = cMapU[p.capacitacion_id] || null
-      const colPorId = cByIdU[p.colaborador_id]
-      const colPorCorreo = p.correo && !p.correo.startsWith('sin-correo__')
-        ? cByCorreoU[p.correo.toLowerCase().trim()]
-        : null
-      const colPorNombre = p.nombre_colab
-        ? cByNombreU[p.nombre_colab.toUpperCase().trim()]
-        : null
-      const col = colPorId || colPorCorreo || colPorNombre || null
-      const correoResuelto = col?.correo ||
-        (p.correo && !p.correo.startsWith('sin-correo__') ? p.correo : null) || null
-
+      const col = cByIdU[p.colaborador_id] ||
+        (p.correo && !p.correo.startsWith('sin-correo__') ? cByCorreoU[p.correo.toLowerCase().trim()] : null) ||
+        (p.nombre_colab ? cByNombreU[p.nombre_colab.toUpperCase().trim()] : null) || null
+      const correoResuelto = col?.correo || (p.correo && !p.correo.startsWith('sin-correo__') ? p.correo : null) || null
       return {
         ...p, _cap: c, _col: col,
         _anio: c?.fecha_inicio ? new Date(c.fecha_inicio).getFullYear() : null,
@@ -193,13 +165,22 @@ export default function Participantes({ onCambio }) {
     return () => clearTimeout(timer)
   }, [busqueda, filtroAnio, filtroCap, filtroProveedor, cargadoInicial])
 
+  // Búsqueda de capacitación en modal
+  useEffect(() => {
+    if (!busquedaCap || busquedaCap.length < 2) { setResultadosCap([]); return }
+    const b = busquedaCap.toLowerCase()
+    setResultadosCap(
+      capacitaciones.filter(c => c.nombre?.toLowerCase().includes(b)).slice(0, 8)
+    )
+  }, [busquedaCap, capacitaciones])
+
+  // Búsqueda de colaborador en modal
   useEffect(() => {
     if (!busquedaColab) { setResultados([]); return }
     const b = busquedaColab.toLowerCase()
     setResultados(
       colaboradores.filter(c =>
-        c.nombre?.toLowerCase().includes(b) ||
-        c.correo?.toLowerCase().includes(b)
+        c.nombre?.toLowerCase().includes(b) || c.correo?.toLowerCase().includes(b)
       ).slice(0, 8)
     )
   }, [busquedaColab, colaboradores])
@@ -207,29 +188,26 @@ export default function Participantes({ onCambio }) {
   // Procesar correos masivos
   useEffect(() => {
     if (!correosMasivos.trim()) { setResultadosMasivos([]); return }
-    const lineas = correosMasivos
-      .split(/[\n,;]+/)
-      .map(l => l.trim().toLowerCase())
-      .filter(l => l.includes('@'))
-
+    const lineas = correosMasivos.split(/[\n,;]+/).map(l => l.trim().toLowerCase()).filter(l => l.includes('@'))
     const encontrados = lineas.map(correo => {
       const col = colByCorreoMap[correo]
-      return {
-        correo,
-        col: col || null,
-        encontrado: !!col,
-        nombre: col?.nombre || '—',
-        gerencia: col?.gerencia || '—',
-      }
+      return { correo, col: col || null, encontrado: !!col, nombre: col?.nombre || '—', gerencia: col?.gerencia || '—' }
     })
     setResultadosMasivos(encontrados)
   }, [correosMasivos, colByCorreoMap])
 
-  async function cargarMas() {
-    const nueva = paginaActual + 1
-    setCargando(true)
-    await buscarConFiltros(nueva, filtroAnio, filtroCap, filtroProveedor, busqueda, null, null, null, null, null, false)
-    setCargando(false)
+  function seleccionarCap(cap) {
+    setCapSeleccionada(cap.id)
+    setCapSeleccionadaNombre(cap.nombre)
+    setBusquedaCap(cap.nombre)
+    setResultadosCap([])
+  }
+
+  function limpiarCap() {
+    setCapSeleccionada('')
+    setCapSeleccionadaNombre('')
+    setBusquedaCap('')
+    setResultadosCap([])
   }
 
   function cerrarModal() {
@@ -238,7 +216,7 @@ export default function Participantes({ onCambio }) {
     setCorreosMasivos('')
     setResultados([])
     setResultadosMasivos([])
-    setCapSeleccionada('')
+    limpiarCap()
     setModoMasivo(false)
   }
 
@@ -251,8 +229,7 @@ export default function Participantes({ onCambio }) {
       colaborador_id: colaborador.id,
       correo: colaborador.correo.toLowerCase().trim(),
       horas: cap?.horas || 0,
-      genero: null,
-      costo: 0,
+      genero: null, costo: 0,
       nombre_colab: colaborador.nombre,
       gerencia_colab: colaborador.gerencia || null,
       departamento_colab: colaborador.departamento || null,
@@ -267,46 +244,35 @@ export default function Participantes({ onCambio }) {
       setCargando(false)
       if (onCambio) onCambio()
       setTimeout(() => setExito(''), 3000)
-    } else {
-      alert('Error: ' + error.message)
-    }
+    } else { alert('Error: ' + error.message) }
     setGuardando(false)
   }
 
   async function agregarMasivo() {
     if (!capSeleccionada) { alert('Seleccioná una capacitación primero'); return }
     if (resultadosMasivos.length === 0) { alert('No hay correos válidos para agregar'); return }
-
     const cap = capacitaciones.find(c => c.id === capSeleccionada)
     setGuardando(true)
-
-    let insertados = 0, errores = 0, omitidos = 0
-
+    let insertados = 0, omitidos = 0, errores = 0
     for (const item of resultadosMasivos) {
       if (!item.encontrado) { omitidos++; continue }
-
-      const registro = {
+      const { error } = await supabase.from('participantes').insert([{
         capacitacion_id: capSeleccionada,
         colaborador_id: item.col.id,
         correo: item.correo,
         horas: cap?.horas || 0,
-        genero: null,
-        costo: 0,
+        genero: null, costo: 0,
         nombre_colab: item.col.nombre,
         gerencia_colab: item.col.gerencia || null,
         departamento_colab: item.col.departamento || null,
         puesto_colab: item.col.puesto || null,
-      }
-
-      const { error } = await supabase.from('participantes').insert([registro])
+      }])
       if (!error) insertados++
-      else if (error.code === '23505') omitidos++ // ya existe
+      else if (error.code === '23505') omitidos++
       else errores++
     }
-
     setGuardando(false)
-    const msg = `✅ ${insertados} participantes agregados${omitidos > 0 ? `, ${omitidos} omitidos (ya existían o no se encontraron)` : ''}${errores > 0 ? `, ${errores} errores` : ''}`
-    setExito(msg)
+    setExito(`✅ ${insertados} participantes agregados${omitidos > 0 ? `, ${omitidos} omitidos` : ''}${errores > 0 ? `, ${errores} errores` : ''}`)
     cerrarModal()
     setCargando(true)
     await buscarConFiltros(0, filtroAnio, filtroCap, filtroProveedor, busqueda, null, null, null, null, null, true)
@@ -315,16 +281,19 @@ export default function Participantes({ onCambio }) {
     setTimeout(() => setExito(''), 5000)
   }
 
+  async function cargarMas() {
+    const nueva = paginaActual + 1
+    setCargando(true)
+    await buscarConFiltros(nueva, filtroAnio, filtroCap, filtroProveedor, busqueda, null, null, null, null, null, false)
+    setCargando(false)
+  }
+
   const capsFiltradasSelector = capacitaciones
     .filter(c => !filtroAnio || (c.fecha_inicio && new Date(c.fecha_inicio).getFullYear() === parseInt(filtroAnio)))
     .filter(c => !filtroProveedor || c.proveedor === filtroProveedor)
 
   const hayFiltros = filtroCap || busqueda || filtroProveedor
-
-  const inp = {
-    height: '36px', border: '1px solid #E2E8F0', borderRadius: '8px',
-    padding: '0 10px', fontSize: '13px', outline: 'none', background: 'white'
-  }
+  const inp = { height: '36px', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0 10px', fontSize: '13px', outline: 'none', background: 'white' }
 
   return (
     <div>
@@ -345,13 +314,9 @@ export default function Participantes({ onCambio }) {
       </div>
 
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
-        <input
-          type="text"
-          placeholder="🔍 Nombre, correo, capacitación, gerencia..."
-          value={busqueda}
-          onChange={e => setBusqueda(e.target.value)}
-          style={{ ...inp, width: '260px' }}
-        />
+        <input type="text" placeholder="🔍 Nombre, correo, capacitación, gerencia..."
+          value={busqueda} onChange={e => setBusqueda(e.target.value)}
+          style={{ ...inp, width: '260px' }} />
         <select value={filtroAnio} onChange={e => { setFiltroAnio(e.target.value); setFiltroCap('') }}
           style={{ ...inp, width: '120px' }}>
           <option value="">Todos los años</option>
@@ -430,22 +395,55 @@ export default function Participantes({ onCambio }) {
           <div style={{ background: 'white', borderRadius: '16px', width: '560px', maxWidth: '95vw', maxHeight: '90vh', overflow: 'auto' }}>
             <div style={{ padding: '20px 24px', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: '16px', fontWeight: '600' }}>Agregar participante</div>
-              <button onClick={cerrarModal}
-                style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#94A3B8' }}>✕</button>
+              <button onClick={cerrarModal} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#94A3B8' }}>✕</button>
             </div>
 
             <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
-              {/* Capacitación */}
+              {/* Búsqueda de capacitación */}
               <div>
-                <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }}>Capacitación *</label>
-                <select value={capSeleccionada} onChange={e => setCapSeleccionada(e.target.value)} style={{ ...inp, width: '100%' }}>
-                  <option value="">Seleccionar capacitación...</option>
-                  {capacitaciones.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                </select>
+                <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }}>
+                  Capacitación *
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    placeholder="Buscar capacitación por nombre..."
+                    value={busquedaCap}
+                    onChange={e => {
+                      setBusquedaCap(e.target.value)
+                      if (capSeleccionada) limpiarCap()
+                    }}
+                    style={{ ...inp, width: '100%', paddingRight: capSeleccionada ? '32px' : '10px', borderColor: capSeleccionada ? '#0F9B72' : '#E2E8F0' }}
+                  />
+                  {capSeleccionada && (
+                    <button onClick={limpiarCap}
+                      style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', fontSize: '16px' }}>✕</button>
+                  )}
+                  {resultadosCap.length > 0 && (
+                    <div style={{ position: 'absolute', top: '40px', left: 0, right: 0, background: 'white', border: '1px solid #E2E8F0', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: '220px', overflowY: 'auto' }}>
+                      {resultadosCap.map((c, i) => (
+                        <div key={c.id} onClick={() => seleccionarCap(c)}
+                          style={{ padding: '10px 14px', cursor: 'pointer', fontSize: '13px', borderBottom: i < resultadosCap.length - 1 ? '1px solid #F1F5F9' : 'none' }}
+                          onMouseEnter={e => e.currentTarget.style.background = '#F8FAFC'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'white'}>
+                          <div style={{ fontWeight: '500', color: '#1E293B' }}>{c.nombre}</div>
+                          <div style={{ fontSize: '11px', color: '#94A3B8' }}>
+                            {c.proveedor || '—'} · {c.horas}h · {c.fecha_inicio?.slice(0, 4) || '—'}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {capSeleccionada && (
+                  <div style={{ marginTop: '6px', fontSize: '11px', color: '#0F9B72', fontWeight: '500' }}>
+                    ✓ Capacitación seleccionada
+                  </div>
+                )}
               </div>
 
-              {/* Tabs: individual vs masivo */}
+              {/* Tabs */}
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button onClick={() => setModoMasivo(false)}
                   style={{ flex: 1, padding: '8px', borderRadius: '8px', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: '500', background: !modoMasivo ? '#8131B0' : '#F1F5F9', color: !modoMasivo ? 'white' : '#64748B' }}>
@@ -457,18 +455,14 @@ export default function Participantes({ onCambio }) {
                 </button>
               </div>
 
-              {/* Modo individual */}
+              {/* Individual */}
               {!modoMasivo && (
                 <>
                   <div>
                     <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }}>Buscar colaborador *</label>
-                    <input
-                      type="text"
-                      placeholder="Escribí el nombre o correo..."
-                      value={busquedaColab}
-                      onChange={e => setBusquedaColab(e.target.value)}
-                      style={{ ...inp, width: '100%' }}
-                    />
+                    <input type="text" placeholder="Escribí el nombre o correo..."
+                      value={busquedaColab} onChange={e => setBusquedaColab(e.target.value)}
+                      style={{ ...inp, width: '100%' }} />
                   </div>
                   {resultados.length > 0 && (
                     <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
@@ -492,7 +486,7 @@ export default function Participantes({ onCambio }) {
                 </>
               )}
 
-              {/* Modo masivo */}
+              {/* Masivo */}
               {modoMasivo && (
                 <>
                   <div>
@@ -506,7 +500,6 @@ export default function Participantes({ onCambio }) {
                       style={{ width: '100%', height: '120px', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px', fontSize: '13px', outline: 'none', resize: 'vertical', fontFamily: 'monospace' }}
                     />
                   </div>
-
                   {resultadosMasivos.length > 0 && (
                     <div>
                       <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '8px', display: 'flex', gap: '12px' }}>
@@ -526,26 +519,14 @@ export default function Participantes({ onCambio }) {
                                 {r.encontrado ? `${r.correo} · ${r.gerencia}` : 'No encontrado en el sistema'}
                               </div>
                             </div>
-                            <span style={{
-                              padding: '2px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: '500',
-                              background: r.encontrado ? '#F0FDF4' : '#FEF2F2',
-                              color: r.encontrado ? '#0F9B72' : '#DA2B1F'
-                            }}>
+                            <span style={{ padding: '2px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: '500', background: r.encontrado ? '#F0FDF4' : '#FEF2F2', color: r.encontrado ? '#0F9B72' : '#DA2B1F' }}>
                               {r.encontrado ? '✓' : '✗'}
                             </span>
                           </div>
                         ))}
                       </div>
-
-                      <button
-                        onClick={agregarMasivo}
-                        disabled={guardando || resultadosMasivos.filter(r => r.encontrado).length === 0}
-                        style={{
-                          marginTop: '12px', width: '100%', background: guardando ? '#E2E8F0' : '#8131B0',
-                          color: guardando ? '#94A3B8' : 'white', border: 'none', padding: '10px',
-                          borderRadius: '8px', cursor: guardando ? 'not-allowed' : 'pointer',
-                          fontSize: '13px', fontWeight: '500'
-                        }}>
+                      <button onClick={agregarMasivo} disabled={guardando || resultadosMasivos.filter(r => r.encontrado).length === 0}
+                        style={{ marginTop: '12px', width: '100%', background: guardando ? '#E2E8F0' : '#8131B0', color: guardando ? '#94A3B8' : 'white', border: 'none', padding: '10px', borderRadius: '8px', cursor: guardando ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: '500' }}>
                         {guardando ? '⏳ Agregando...' : `Agregar ${resultadosMasivos.filter(r => r.encontrado).length} participantes`}
                       </button>
                     </div>
