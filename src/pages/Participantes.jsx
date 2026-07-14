@@ -20,8 +20,11 @@ export default function Participantes({ onCambio }) {
   const [colByCorreoMap, setColByCorreoMap] = useState({})
   const [colByNombreMap, setColByNombreMap] = useState({})
   const [modal, setModal] = useState(false)
+  const [modoMasivo, setModoMasivo] = useState(false)
   const [busquedaColab, setBusquedaColab] = useState('')
+  const [correosMasivos, setCorreosMasivos] = useState('')
   const [resultados, setResultados] = useState([])
+  const [resultadosMasivos, setResultadosMasivos] = useState([])
   const [capSeleccionada, setCapSeleccionada] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [exito, setExito] = useState('')
@@ -80,7 +83,6 @@ export default function Participantes({ onCambio }) {
     const desde = pag * POR_PAGINA
     const hasta = desde + POR_PAGINA - 1
 
-    // Calcular capIds solo si hay filtro de año o proveedor
     let capIds = null
     if (anio || prov) {
       let capsFiltered = capsU
@@ -95,7 +97,6 @@ export default function Participantes({ onCambio }) {
       if (capsFiltered.length > 0) capIds = capsFiltered.map(c => c.id)
     }
 
-    // Búsqueda en servidor
     let correosEncontrados = null
     if (busq && busq.trim().length > 0) {
       const t = busq.toLowerCase().trim()
@@ -161,14 +162,11 @@ export default function Participantes({ onCambio }) {
         ? cByNombreU[p.nombre_colab.toUpperCase().trim()]
         : null
       const col = colPorId || colPorCorreo || colPorNombre || null
-
       const correoResuelto = col?.correo ||
         (p.correo && !p.correo.startsWith('sin-correo__') ? p.correo : null) || null
 
       return {
-        ...p,
-        _cap: c,
-        _col: col,
+        ...p, _cap: c, _col: col,
         _anio: c?.fecha_inicio ? new Date(c.fecha_inicio).getFullYear() : null,
         _nombre: col?.nombre || p.nombre_colab || '—',
         _correo: correoResuelto || '—',
@@ -179,11 +177,8 @@ export default function Participantes({ onCambio }) {
       }
     })
 
-    if (reset || pag === 0) {
-      setParticipantes(enriquecidos)
-    } else {
-      setParticipantes(prev => [...prev, ...enriquecidos])
-    }
+    if (reset || pag === 0) setParticipantes(enriquecidos)
+    else setParticipantes(prev => [...prev, ...enriquecidos])
     setTotalCount(count || 0)
     setPaginaActual(pag)
   }
@@ -209,11 +204,42 @@ export default function Participantes({ onCambio }) {
     )
   }, [busquedaColab, colaboradores])
 
+  // Procesar correos masivos
+  useEffect(() => {
+    if (!correosMasivos.trim()) { setResultadosMasivos([]); return }
+    const lineas = correosMasivos
+      .split(/[\n,;]+/)
+      .map(l => l.trim().toLowerCase())
+      .filter(l => l.includes('@'))
+
+    const encontrados = lineas.map(correo => {
+      const col = colByCorreoMap[correo]
+      return {
+        correo,
+        col: col || null,
+        encontrado: !!col,
+        nombre: col?.nombre || '—',
+        gerencia: col?.gerencia || '—',
+      }
+    })
+    setResultadosMasivos(encontrados)
+  }, [correosMasivos, colByCorreoMap])
+
   async function cargarMas() {
     const nueva = paginaActual + 1
     setCargando(true)
     await buscarConFiltros(nueva, filtroAnio, filtroCap, filtroProveedor, busqueda, null, null, null, null, null, false)
     setCargando(false)
+  }
+
+  function cerrarModal() {
+    setModal(false)
+    setBusquedaColab('')
+    setCorreosMasivos('')
+    setResultados([])
+    setResultadosMasivos([])
+    setCapSeleccionada('')
+    setModoMasivo(false)
   }
 
   async function agregar(colaborador) {
@@ -245,6 +271,48 @@ export default function Participantes({ onCambio }) {
       alert('Error: ' + error.message)
     }
     setGuardando(false)
+  }
+
+  async function agregarMasivo() {
+    if (!capSeleccionada) { alert('Seleccioná una capacitación primero'); return }
+    if (resultadosMasivos.length === 0) { alert('No hay correos válidos para agregar'); return }
+
+    const cap = capacitaciones.find(c => c.id === capSeleccionada)
+    setGuardando(true)
+
+    let insertados = 0, errores = 0, omitidos = 0
+
+    for (const item of resultadosMasivos) {
+      if (!item.encontrado) { omitidos++; continue }
+
+      const registro = {
+        capacitacion_id: capSeleccionada,
+        colaborador_id: item.col.id,
+        correo: item.correo,
+        horas: cap?.horas || 0,
+        genero: null,
+        costo: 0,
+        nombre_colab: item.col.nombre,
+        gerencia_colab: item.col.gerencia || null,
+        departamento_colab: item.col.departamento || null,
+        puesto_colab: item.col.puesto || null,
+      }
+
+      const { error } = await supabase.from('participantes').insert([registro])
+      if (!error) insertados++
+      else if (error.code === '23505') omitidos++ // ya existe
+      else errores++
+    }
+
+    setGuardando(false)
+    const msg = `✅ ${insertados} participantes agregados${omitidos > 0 ? `, ${omitidos} omitidos (ya existían o no se encontraron)` : ''}${errores > 0 ? `, ${errores} errores` : ''}`
+    setExito(msg)
+    cerrarModal()
+    setCargando(true)
+    await buscarConFiltros(0, filtroAnio, filtroCap, filtroProveedor, busqueda, null, null, null, null, null, true)
+    setCargando(false)
+    if (onCambio) onCambio()
+    setTimeout(() => setExito(''), 5000)
   }
 
   const capsFiltradasSelector = capacitaciones
@@ -356,15 +424,19 @@ export default function Participantes({ onCambio }) {
         )}
       </div>
 
+      {/* Modal */}
       {modal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'white', borderRadius: '16px', width: '520px', maxWidth: '95vw', maxHeight: '90vh', overflow: 'auto' }}>
+          <div style={{ background: 'white', borderRadius: '16px', width: '560px', maxWidth: '95vw', maxHeight: '90vh', overflow: 'auto' }}>
             <div style={{ padding: '20px 24px', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: '16px', fontWeight: '600' }}>Agregar participante</div>
-              <button onClick={() => { setModal(false); setBusquedaColab(''); setResultados([]) }}
+              <button onClick={cerrarModal}
                 style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#94A3B8' }}>✕</button>
             </div>
+
             <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+
+              {/* Capacitación */}
               <div>
                 <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }}>Capacitación *</label>
                 <select value={capSeleccionada} onChange={e => setCapSeleccionada(e.target.value)} style={{ ...inp, width: '100%' }}>
@@ -372,38 +444,118 @@ export default function Participantes({ onCambio }) {
                   {capacitaciones.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                 </select>
               </div>
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }}>Buscar colaborador *</label>
-                <input
-                  type="text"
-                  placeholder="Escribí el nombre o correo..."
-                  value={busquedaColab}
-                  onChange={e => setBusquedaColab(e.target.value)}
-                  style={{ ...inp, width: '100%' }}
-                />
+
+              {/* Tabs: individual vs masivo */}
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={() => setModoMasivo(false)}
+                  style={{ flex: 1, padding: '8px', borderRadius: '8px', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: '500', background: !modoMasivo ? '#8131B0' : '#F1F5F9', color: !modoMasivo ? 'white' : '#64748B' }}>
+                  👤 Individual
+                </button>
+                <button onClick={() => setModoMasivo(true)}
+                  style={{ flex: 1, padding: '8px', borderRadius: '8px', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: '500', background: modoMasivo ? '#8131B0' : '#F1F5F9', color: modoMasivo ? 'white' : '#64748B' }}>
+                  👥 Masivo (pegar correos)
+                </button>
               </div>
-              {resultados.length > 0 && (
-                <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
-                  {resultados.map((c, i) => (
-                    <div key={c.id} onClick={() => agregar(c)}
-                      style={{ padding: '10px 14px', cursor: 'pointer', fontSize: '13px', background: i % 2 === 0 ? 'white' : '#F8FAFC', borderBottom: i < resultados.length - 1 ? '1px solid #F1F5F9' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <div style={{ fontWeight: '500', color: '#1E293B' }}>{c.nombre}</div>
-                        <div style={{ fontSize: '11px', color: '#94A3B8' }}>{c.correo} · {c.gerencia}</div>
-                      </div>
-                      <span style={{ background: '#EEF0FF', color: '#8131B0', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '500' }}>
-                        {guardando ? '...' : '+ Agregar'}
-                      </span>
+
+              {/* Modo individual */}
+              {!modoMasivo && (
+                <>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }}>Buscar colaborador *</label>
+                    <input
+                      type="text"
+                      placeholder="Escribí el nombre o correo..."
+                      value={busquedaColab}
+                      onChange={e => setBusquedaColab(e.target.value)}
+                      style={{ ...inp, width: '100%' }}
+                    />
+                  </div>
+                  {resultados.length > 0 && (
+                    <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
+                      {resultados.map((c, i) => (
+                        <div key={c.id} onClick={() => agregar(c)}
+                          style={{ padding: '10px 14px', cursor: 'pointer', fontSize: '13px', background: i % 2 === 0 ? 'white' : '#F8FAFC', borderBottom: i < resultados.length - 1 ? '1px solid #F1F5F9' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div>
+                            <div style={{ fontWeight: '500', color: '#1E293B' }}>{c.nombre}</div>
+                            <div style={{ fontSize: '11px', color: '#94A3B8' }}>{c.correo} · {c.gerencia}</div>
+                          </div>
+                          <span style={{ background: '#EEF0FF', color: '#8131B0', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '500' }}>
+                            {guardando ? '...' : '+ Agregar'}
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  )}
+                  {busquedaColab && resultados.length === 0 && (
+                    <div style={{ fontSize: '13px', color: '#94A3B8', textAlign: 'center', padding: '10px' }}>No se encontraron colaboradores</div>
+                  )}
+                </>
               )}
-              {busquedaColab && resultados.length === 0 && (
-                <div style={{ fontSize: '13px', color: '#94A3B8', textAlign: 'center', padding: '10px' }}>No se encontraron colaboradores</div>
+
+              {/* Modo masivo */}
+              {modoMasivo && (
+                <>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }}>
+                      Pegá los correos (uno por línea, o separados por coma o punto y coma)
+                    </label>
+                    <textarea
+                      value={correosMasivos}
+                      onChange={e => setCorreosMasivos(e.target.value)}
+                      placeholder={'usuario1@coopeande1.com\nusuario2@coopeande1.com\nusuario3@coopeande1.com'}
+                      style={{ width: '100%', height: '120px', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px', fontSize: '13px', outline: 'none', resize: 'vertical', fontFamily: 'monospace' }}
+                    />
+                  </div>
+
+                  {resultadosMasivos.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '8px', display: 'flex', gap: '12px' }}>
+                        <span style={{ color: '#0F9B72', fontWeight: '600' }}>✅ {resultadosMasivos.filter(r => r.encontrado).length} encontrados</span>
+                        {resultadosMasivos.filter(r => !r.encontrado).length > 0 && (
+                          <span style={{ color: '#DA2B1F', fontWeight: '600' }}>⚠️ {resultadosMasivos.filter(r => !r.encontrado).length} no encontrados</span>
+                        )}
+                      </div>
+                      <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden', maxHeight: '200px', overflowY: 'auto' }}>
+                        {resultadosMasivos.map((r, i) => (
+                          <div key={i} style={{ padding: '8px 12px', fontSize: '12px', background: i % 2 === 0 ? 'white' : '#FAFAFA', borderBottom: i < resultadosMasivos.length - 1 ? '1px solid #F1F5F9' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                              <div style={{ fontWeight: '500', color: r.encontrado ? '#1E293B' : '#94A3B8' }}>
+                                {r.encontrado ? r.nombre : r.correo}
+                              </div>
+                              <div style={{ fontSize: '11px', color: '#94A3B8' }}>
+                                {r.encontrado ? `${r.correo} · ${r.gerencia}` : 'No encontrado en el sistema'}
+                              </div>
+                            </div>
+                            <span style={{
+                              padding: '2px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: '500',
+                              background: r.encontrado ? '#F0FDF4' : '#FEF2F2',
+                              color: r.encontrado ? '#0F9B72' : '#DA2B1F'
+                            }}>
+                              {r.encontrado ? '✓' : '✗'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <button
+                        onClick={agregarMasivo}
+                        disabled={guardando || resultadosMasivos.filter(r => r.encontrado).length === 0}
+                        style={{
+                          marginTop: '12px', width: '100%', background: guardando ? '#E2E8F0' : '#8131B0',
+                          color: guardando ? '#94A3B8' : 'white', border: 'none', padding: '10px',
+                          borderRadius: '8px', cursor: guardando ? 'not-allowed' : 'pointer',
+                          fontSize: '13px', fontWeight: '500'
+                        }}>
+                        {guardando ? '⏳ Agregando...' : `Agregar ${resultadosMasivos.filter(r => r.encontrado).length} participantes`}
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
+
             <div style={{ padding: '16px 24px', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'flex-end' }}>
-              <button onClick={() => { setModal(false); setBusquedaColab(''); setResultados([]) }}
+              <button onClick={cerrarModal}
                 style={{ padding: '8px 18px', border: '1px solid #E2E8F0', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', background: 'white' }}>
                 Cerrar
               </button>
