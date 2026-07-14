@@ -7,25 +7,15 @@ const supabase = createClient(
 )
 
 const CATEGORIAS = [
-  'UC1 · Inducción Corporativa',
-  'UC1 · Formación al Puesto',
-  'UC2 · Código de Conducta',
-  'UC2 · Seguridad de la Información',
-  'UC2 · Riesgos',
-  'UC2 · PLC/FT',
-  'UC2 · Competencias Digitales',
-  'UC2 · Adaptabilidad al Cambio',
-  'UC2 · Innovación',
-  'UC2 · Eficiencia y Agilidad',
-  'UC2 · Comunicación',
-  'UC2 · Análisis de Datos',
-  'UC3 · Capacitación Especializada',
-  'UC3 · Transformación Empresarial',
-  'UC4 · Puestos Clave',
-  'UC4 · Programa de Liderazgo',
-  'UC5 · Brigadas',
-  'UC5 · Semana del Equilibrio',
-  'UC5 · Webinars Opcionales',
+  'UC1 - Inducción Corporativa',
+  'UC1 - Formación al Puesto',
+  'UC2 - Capacitaciones Normativas',
+  'UC2 - Desarrollo de Competencias',
+  'UC3 - Capacitación Especializada',
+  'UC3 - Transformación Empresarial',
+  'UC4 - Puestos Claves',
+  'UC4 - Programa de Liderazgo',
+  'UC5 - Salud y Bienestar',
 ]
 
 const VACIO = {
