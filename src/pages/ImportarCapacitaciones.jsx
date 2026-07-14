@@ -35,16 +35,17 @@ export default function ImportarCapacitaciones() {
   function limpiarCategoria(des) {
     if (!des) return ''
     const d = des.toString().trim()
-    if (d.includes('UC1') && d.includes('Inducción')) return 'UC1 · Inducción Corporativa'
-    if (d.includes('UC1') && d.includes('Formación')) return 'UC1 · Formación al Puesto'
-    if (d.includes('UC2') && d.includes('Normativ')) return 'UC2 · Código de Conducta'
-    if (d.includes('UC2') && d.includes('Competencia')) return 'UC2 · Competencias Digitales'
-    if (d.includes('UC3') && d.includes('Transform')) return 'UC3 · Transformación Empresarial'
-    if (d.includes('UC3')) return 'UC3 · Capacitación Especializada'
-    if (d.includes('UC4') && d.includes('Liderazgo')) return 'UC4 · Programa de Liderazgo'
-    if (d.includes('UC4')) return 'UC4 · Puestos Clave'
-    if (d.includes('UC5')) return 'UC5 · Salud y Bienestar'
-    return d
+    if (d.includes('UC1') && (d.includes('Inducción') || d.includes('Induccion') || d.includes('INDUCCIÓN'))) return 'UC1 - Inducción Corporativa'
+    if (d.includes('UC1') && (d.includes('Formación') || d.includes('Formacion') || d.includes('FORMACIÓN'))) return 'UC1 - Formación al Puesto'
+    if (d.includes('UC2') && (d.includes('Normativ') || d.includes('NORMATIV') || d.includes('Conducta'))) return 'UC2 - Capacitaciones Normativas'
+    if (d.includes('UC2') && (d.includes('Competencia') || d.includes('Desarrollo') || d.includes('COMPETENCIA'))) return 'UC2 - Desarrollo de Competencias'
+    if (d.includes('UC2')) return 'UC2 - Capacitaciones Normativas'
+    if (d.includes('UC3') && (d.includes('Transform') || d.includes('TRANSFORM'))) return 'UC3 - Transformación Empresarial'
+    if (d.includes('UC3')) return 'UC3 - Capacitación Especializada'
+    if (d.includes('UC4') && (d.includes('Liderazgo') || d.includes('LIDERAZGO'))) return 'UC4 - Programa de Liderazgo'
+    if (d.includes('UC4')) return 'UC4 - Puestos Claves'
+    if (d.includes('UC5')) return 'UC5 - Salud y Bienestar'
+    return ''
   }
 
   function excelFecha(valor) {
@@ -193,8 +194,6 @@ export default function ImportarCapacitaciones() {
       const horasFila = Number(fila['Horas capacitación']) || 0
       const generoFila = limpiarGenero(fila['Género'])
       const costoFila = Number(fila['Costo']) || 0
-
-      // Datos organizacionales del Excel
       const gerenciaFila = limpiarTexto(fila['Gerencia'])
       const departamentoFila = limpiarTexto(fila['Departamento'])
       const puestoFila = limpiarTexto(fila['Puesto'])
@@ -215,7 +214,7 @@ export default function ImportarCapacitaciones() {
       participantesLote.push({
         colaborador_id: colId,
         capacitacion_id: capId,
-        correo: correo,
+        correo,
         horas: horasFila,
         genero: generoFila,
         costo: costoFila,
