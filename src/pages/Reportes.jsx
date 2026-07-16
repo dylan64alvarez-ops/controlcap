@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
-import * as XLSX from 'xlsx'
+import XLSXStyle from 'xlsx-js-style'
 import PptxGenJS from 'pptxgenjs'
 
 const supabase = createClient(
@@ -10,6 +10,100 @@ const supabase = createClient(
 
 const ANIOS = ['2026', '2025', '2024', '2023', '2022', '2021']
 const COLORS = { azul: '#0072DA', morado: '#8131B0', rojo: '#DA2B1F', grafito: '#414042' }
+
+// Paleta CoopeAnde para Excel
+const XL = {
+  NAVY:   { rgb: '1B2560' },
+  PURPLE: { rgb: '8131B0' },
+  BLUE:   { rgb: '0072DA' },
+  YELLOW: { rgb: 'FFCF00' },
+  RED:    { rgb: 'DA2B1F' },
+  WHITE:  { rgb: 'FFFFFF' },
+  LIGHT:  { rgb: 'F8FAFC' },
+  LIGHT2: { rgb: 'EEF0FF' },
+  GRAY:   { rgb: '64748B' },
+  GREEN:  { rgb: '0F9B72' },
+}
+
+function celda(valor, estilo = {}) {
+  return { v: valor ?? '', s: estilo }
+}
+
+function headerCell(valor, bgColor = XL.NAVY) {
+  return celda(valor, {
+    font: { bold: true, color: XL.WHITE, sz: 11, name: 'Arial' },
+    fill: { fgColor: bgColor },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border: {
+      top: { style: 'thin', color: XL.WHITE },
+      bottom: { style: 'thin', color: XL.WHITE },
+      left: { style: 'thin', color: XL.WHITE },
+      right: { style: 'thin', color: XL.WHITE },
+    }
+  })
+}
+
+function dataCell(valor, opciones = {}) {
+  const { bold = false, color = { rgb: '1E293B' }, bg = XL.WHITE, align = 'left', sz = 10 } = opciones
+  return celda(valor, {
+    font: { bold, color, sz, name: 'Arial' },
+    fill: { fgColor: bg },
+    alignment: { horizontal: align, vertical: 'center', wrapText: false },
+    border: {
+      top: { style: 'hair', color: { rgb: 'E2E8F0' } },
+      bottom: { style: 'hair', color: { rgb: 'E2E8F0' } },
+      left: { style: 'hair', color: { rgb: 'E2E8F0' } },
+      right: { style: 'hair', color: { rgb: 'E2E8F0' } },
+    }
+  })
+}
+
+function titleCell(valor) {
+  return celda(valor, {
+    font: { bold: true, sz: 16, color: XL.NAVY, name: 'Arial' },
+    fill: { fgColor: XL.WHITE },
+    alignment: { horizontal: 'left', vertical: 'center' },
+  })
+}
+
+function subtitleCell(valor) {
+  return celda(valor, {
+    font: { sz: 10, color: XL.GRAY, name: 'Arial', italic: true },
+    fill: { fgColor: XL.WHITE },
+    alignment: { horizontal: 'left', vertical: 'center' },
+  })
+}
+
+function kpiLabelCell(valor) {
+  return celda(valor, {
+    font: { bold: true, sz: 9, color: XL.GRAY, name: 'Arial' },
+    fill: { fgColor: XL.LIGHT },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: { bottom: { style: 'thin', color: XL.PURPLE } }
+  })
+}
+
+function kpiValueCell(valor, color = XL.PURPLE) {
+  return celda(valor, {
+    font: { bold: true, sz: 18, color, name: 'Arial' },
+    fill: { fgColor: XL.LIGHT },
+    alignment: { horizontal: 'center', vertical: 'center' },
+  })
+}
+
+function accentCell(valor, color = XL.PURPLE) {
+  return celda(valor, {
+    font: { bold: true, sz: 10, color, name: 'Arial' },
+    fill: { fgColor: XL.WHITE },
+    alignment: { horizontal: 'right', vertical: 'center' },
+    border: {
+      top: { style: 'hair', color: { rgb: 'E2E8F0' } },
+      bottom: { style: 'hair', color: { rgb: 'E2E8F0' } },
+      left: { style: 'hair', color: { rgb: 'E2E8F0' } },
+      right: { style: 'hair', color: { rgb: 'E2E8F0' } },
+    }
+  })
+}
 
 export default function Reportes() {
   const [generando, setGenerando] = useState('')
@@ -40,69 +134,42 @@ export default function Reportes() {
     ])
     const cols = colRes.data || []
     const caps = capRes.data || []
-    const gersUnicas = [...new Set(cols.map(c => c.gerencia).filter(Boolean))].sort()
-    const provUnicas = [...new Set(caps.map(c => c.proveedor).filter(Boolean))].sort()
-    setGerencias(gersUnicas)
+    setGerencias([...new Set(cols.map(c => c.gerencia).filter(Boolean))].sort())
     setCapacitaciones(caps)
-    setProveedores(provUnicas)
+    setProveedores([...new Set(caps.map(c => c.proveedor).filter(Boolean))].sort())
     setColaboradores(cols)
   }
 
   useEffect(() => {
     if (!filtroGerencia) { setDepartamentos([]); setFiltroDep(''); return }
-    const cargarDeps = async () => {
-      const { data } = await supabase.from('colaboradores').select('departamento').eq('gerencia', filtroGerencia)
-      const deps = [...new Set((data || []).map(c => c.departamento).filter(Boolean))].sort()
-      setDepartamentos(deps)
+    supabase.from('colaboradores').select('departamento').eq('gerencia', filtroGerencia).then(({ data }) => {
+      setDepartamentos([...new Set((data || []).map(c => c.departamento).filter(Boolean))].sort())
       setFiltroDep('')
-    }
-    cargarDeps()
+    })
   }, [filtroGerencia])
 
   useEffect(() => {
     if (!busquedaColab || busquedaColab.length < 2) { setResultadosColab([]); return }
     const b = busquedaColab.toLowerCase()
-    setResultadosColab(
-      colaboradores.filter(c =>
-        c.nombre?.toLowerCase().includes(b) ||
-        c.correo?.toLowerCase().includes(b)
-      ).slice(0, 8)
-    )
+    setResultadosColab(colaboradores.filter(c => c.nombre?.toLowerCase().includes(b) || c.correo?.toLowerCase().includes(b)).slice(0, 8))
   }, [busquedaColab, colaboradores])
 
-  function seleccionarColab(col) {
-    setColabSeleccionado(col)
-    setFiltroColab(col.correo)
-    setBusquedaColab(col.nombre)
-    setResultadosColab([])
-  }
-
-  function limpiarColab() {
-    setColabSeleccionado(null)
-    setFiltroColab('')
-    setBusquedaColab('')
-    setResultadosColab([])
-  }
+  function seleccionarColab(col) { setColabSeleccionado(col); setFiltroColab(col.correo); setBusquedaColab(col.nombre); setResultadosColab([]) }
+  function limpiarColab() { setColabSeleccionado(null); setFiltroColab(''); setBusquedaColab(''); setResultadosColab([]) }
 
   async function obtenerDatosFiltrados() {
     const hayFiltrosCap = filtroAnio || filtroProveedor || filtroCap
-
-    // Siempre cargar TODAS las capacitaciones para lookup
     const { data: todasLasCaps } = await supabase.from('capacitaciones').select('*')
     const capsLookup = todasLasCaps || []
 
-    // Capacitaciones filtradas para determinar qué participantes incluir
     let capsParaFiltro = capsLookup
-    if (filtroAnio) capsParaFiltro = capsParaFiltro.filter(c => c.fecha_inicio && c.fecha_inicio.startsWith(filtroAnio))
+    if (filtroAnio) capsParaFiltro = capsParaFiltro.filter(c => c.fecha_inicio?.startsWith(filtroAnio))
     if (filtroProveedor) capsParaFiltro = capsParaFiltro.filter(c => c.proveedor === filtroProveedor)
     if (filtroCap) capsParaFiltro = capsParaFiltro.filter(c => c.id === filtroCap)
 
     const capIds = capsParaFiltro.map(c => c.id)
-
-    // Si hay filtros de cap pero no hay resultados, retornar vacío
     if (hayFiltrosCap && capIds.length === 0) return { caps: capsParaFiltro, parts: [], cols: [] }
 
-    // Cargar colaboradores
     const { data: cols } = await supabase.from('colaboradores').select('*')
     const colById = {}, colByCorreo = {}, colByNombre = {}
     ;(cols || []).forEach(c => {
@@ -111,58 +178,36 @@ export default function Reportes() {
       if (c.nombre) colByNombre[c.nombre.toUpperCase().trim()] = c
     })
 
-    // Cargar participantes
     let partsRaw = []
-
     if (hayFiltrosCap && capIds.length > 0) {
-      // Dividir en lotes de 400 para evitar límites de Supabase
       for (let i = 0; i < capIds.length; i += 400) {
-        const lote = capIds.slice(i, i + 400)
-        let qLote = supabase.from('participantes').select('*').in('capacitacion_id', lote)
+        let qLote = supabase.from('participantes').select('*').in('capacitacion_id', capIds.slice(i, i + 400))
         if (filtroColab) qLote = qLote.eq('correo', filtroColab)
         const { data: pLote } = await qLote
         if (pLote) partsRaw.push(...pLote)
       }
     } else {
-      // Sin filtros de cap: traer todos paginado
       let desde = 0
-      const porPagina = 1000
       while (true) {
-        let qPage = supabase
-          .from('participantes')
-          .select('*')
-          .range(desde, desde + porPagina - 1)
+        let qPage = supabase.from('participantes').select('*').range(desde, desde + 999)
         if (filtroColab) qPage = qPage.eq('correo', filtroColab)
         const { data: pagina } = await qPage
         if (!pagina || pagina.length === 0) break
         partsRaw.push(...pagina)
-        if (pagina.length < porPagina) break
-        desde += porPagina
+        if (pagina.length < 1000) break
+        desde += 1000
       }
     }
 
-    // Enriquecer participantes
     let parts = partsRaw.map(p => {
       const cap = capsLookup.find(c => c.id === p.capacitacion_id)
-      const col = colById[p.colaborador_id] ||
-        colByCorreo[p.correo?.toLowerCase().trim()] ||
-        colByNombre[p.nombre_colab?.toUpperCase().trim()] ||
-        null
-      const correoResuelto = col?.correo ||
-        (p.correo && !p.correo.startsWith('sin-correo__') ? p.correo : null) || null
-      return {
-        ...p, _cap: cap, _col: col,
-        _nombre: col?.nombre || p.nombre_colab || '—',
-        _correo: correoResuelto || '—',
-        _gerencia: col?.gerencia || p.gerencia_colab || '—',
-        _departamento: col?.departamento || p.departamento_colab || '—',
-        _puesto: col?.puesto || p.puesto_colab || '—',
-      }
+      const col = colById[p.colaborador_id] || colByCorreo[p.correo?.toLowerCase().trim()] || colByNombre[p.nombre_colab?.toUpperCase().trim()] || null
+      const correoResuelto = col?.correo || (p.correo && !p.correo.startsWith('sin-correo__') ? p.correo : null) || null
+      return { ...p, _cap: cap, _col: col, _nombre: col?.nombre || p.nombre_colab || '—', _correo: correoResuelto || '—', _gerencia: col?.gerencia || p.gerencia_colab || '—', _departamento: col?.departamento || p.departamento_colab || '—', _puesto: col?.puesto || p.puesto_colab || '—' }
     })
 
     if (filtroGerencia) parts = parts.filter(p => p._gerencia === filtroGerencia)
     if (filtroDep) parts = parts.filter(p => p._departamento === filtroDep)
-
     return { caps: capsParaFiltro, parts, cols: cols || [] }
   }
 
@@ -188,8 +233,7 @@ export default function Reportes() {
   function getFiltroDesc(caps) {
     return [
       filtroAnio ? `Año ${filtroAnio}` : 'Todos los años',
-      filtroGerencia || '',
-      filtroDep || '',
+      filtroGerencia || '', filtroDep || '',
       filtroProveedor ? `Proveedor: ${filtroProveedor}` : '',
       colabSeleccionado ? `Colaborador: ${colabSeleccionado.nombre}` : '',
       filtroCap ? caps?.find(c => c.id === filtroCap)?.nombre || '' : ''
@@ -212,10 +256,7 @@ export default function Reportes() {
       porGerencia[g].costo += Number(p.costo || 0)
     })
     const filtroDesc = getFiltroDesc(caps)
-
-    const html = `<!DOCTYPE html>
-<html lang="es">
-<head><meta charset="UTF-8"/>
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, sans-serif; color: #1E293B; }
@@ -229,7 +270,7 @@ export default function Reportes() {
   .report-date { font-size: 11px; color: #64748B; margin-bottom: 24px; }
   .kpis { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 28px; }
   .kpi { padding: 16px; border-radius: 8px; border-left: 4px solid; }
-  .kpi-label { font-size: 10px; color: #64748B; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .kpi-label { font-size: 10px; color: #64748B; margin-bottom: 6px; text-transform: uppercase; }
   .kpi-val { font-size: 22px; font-weight: bold; }
   .section { margin-bottom: 28px; }
   .section-title { font-size: 13px; font-weight: bold; color: #1B2560; border-bottom: 2px solid #1B2560; padding-bottom: 6px; margin-bottom: 12px; text-transform: uppercase; }
@@ -239,9 +280,7 @@ export default function Reportes() {
   tr:nth-child(even) td { background: #F8FAFC; }
   .footer { margin-top: 32px; padding: 16px 40px; border-top: 1px solid #E2E8F0; font-size: 10px; color: #94A3B8; display: flex; justify-content: space-between; }
   @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-</style>
-</head>
-<body>
+</style></head><body>
 <div class="header">
   <div class="logo"><span>Control</span>Cap</div>
   <div class="subtitle">Universidad Corporativa · CoopeAnde N.º 1</div>
@@ -257,49 +296,31 @@ export default function Reportes() {
     <div class="kpi" style="border-color:#DA2B1F;background:#FEF2F2"><div class="kpi-label">Costo ejecutado</div><div class="kpi-val" style="color:#DA2B1F">₡${Math.round(totalCosto).toLocaleString()}</div></div>
   </div>
   ${colabSeleccionado ? `
-  <div class="section">
-    <div class="section-title">Perfil del Colaborador</div>
-    <table><tbody>
-      <tr><td><strong>Nombre</strong></td><td>${colabSeleccionado.nombre}</td><td><strong>Correo</strong></td><td>${colabSeleccionado.correo}</td></tr>
-      <tr><td><strong>Gerencia</strong></td><td>${colabSeleccionado.gerencia||'—'}</td><td><strong>Puesto</strong></td><td>${colabSeleccionado.puesto||'—'}</td></tr>
-    </tbody></table>
-  </div>` : `
-  <div class="section">
-    <div class="section-title">Resumen por Gerencia</div>
-    <table>
-      <thead><tr><th>Gerencia</th><th>Participaciones</th><th>Horas</th><th>Costo ejecutado</th></tr></thead>
-      <tbody>${Object.entries(porGerencia).sort((a,b)=>b[1].partic-a[1].partic).map(([g,d])=>
-        `<tr><td>${g}</td><td>${d.partic}</td><td>${d.horas.toLocaleString()}h</td><td>₡${Math.round(d.costo).toLocaleString()}</td></tr>`
-      ).join('')}</tbody>
-    </table>
-  </div>`}
-  <div class="section">
-    <div class="section-title">Capacitaciones</div>
-    <table>
-      <thead><tr><th>Nombre</th><th>Proveedor</th><th>Facilitador</th><th>Horas</th><th>Participantes</th><th>Costo total</th></tr></thead>
-      <tbody>${[...new Map(parts.map(p=>[p.capacitacion_id,p._cap])).values()].filter(Boolean).map(c=>{
-        const ps=parts.filter(p=>p.capacitacion_id===c.id)
-        const ct=ps.reduce((s,p)=>s+Number(p.costo||0),0)
-        return `<tr><td>${c.nombre}</td><td>${c.proveedor||'—'}</td><td>${c.facilitador||'—'}</td><td>${c.horas}h</td><td>${ps.length}</td><td>₡${Math.round(ct).toLocaleString()}</td></tr>`
-      }).join('')}</tbody>
-    </table>
-  </div>
-  <div class="section">
-    <div class="section-title">Detalle de Participantes</div>
-    <table>
-      <thead><tr><th>Colaborador</th><th>Correo</th><th>Gerencia</th><th>Puesto</th><th>Capacitación</th><th>Horas</th><th>Costo</th></tr></thead>
-      <tbody>${parts.map(p=>`
-        <tr><td>${p._nombre}</td><td>${p._correo}</td><td>${p._gerencia}</td><td>${p._puesto}</td><td>${p._cap?.nombre||'—'}</td><td>${p.horas||0}h</td><td>₡${Math.round(p.costo||0).toLocaleString()}</td></tr>`).join('')}
-      </tbody>
-    </table>
-  </div>
+  <div class="section"><div class="section-title">Perfil del Colaborador</div>
+  <table><tbody>
+    <tr><td><strong>Nombre</strong></td><td>${colabSeleccionado.nombre}</td><td><strong>Correo</strong></td><td>${colabSeleccionado.correo}</td></tr>
+    <tr><td><strong>Gerencia</strong></td><td>${colabSeleccionado.gerencia||'—'}</td><td><strong>Puesto</strong></td><td>${colabSeleccionado.puesto||'—'}</td></tr>
+  </tbody></table></div>` : `
+  <div class="section"><div class="section-title">Resumen por Gerencia</div>
+  <table><thead><tr><th>Gerencia</th><th>Participaciones</th><th>Horas</th><th>Costo ejecutado</th></tr></thead>
+  <tbody>${Object.entries(porGerencia).sort((a,b)=>b[1].partic-a[1].partic).map(([g,d])=>`<tr><td>${g}</td><td>${d.partic}</td><td>${d.horas.toLocaleString()}h</td><td>₡${Math.round(d.costo).toLocaleString()}</td></tr>`).join('')}</tbody>
+  </table></div>`}
+  <div class="section"><div class="section-title">Capacitaciones</div>
+  <table><thead><tr><th>Nombre</th><th>Proveedor</th><th>Facilitador</th><th>Horas</th><th>Participantes</th><th>Costo total</th></tr></thead>
+  <tbody>${[...new Map(parts.map(p=>[p.capacitacion_id,p._cap])).values()].filter(Boolean).map(c=>{
+    const ps=parts.filter(p=>p.capacitacion_id===c.id); const ct=ps.reduce((s,p)=>s+Number(p.costo||0),0)
+    return `<tr><td>${c.nombre}</td><td>${c.proveedor||'—'}</td><td>${c.facilitador||'—'}</td><td>${c.horas}h</td><td>${ps.length}</td><td>₡${Math.round(ct).toLocaleString()}</td></tr>`
+  }).join('')}</tbody></table></div>
+  <div class="section"><div class="section-title">Detalle de Participantes</div>
+  <table><thead><tr><th>Colaborador</th><th>Correo</th><th>Gerencia</th><th>Puesto</th><th>Capacitación</th><th>Horas</th><th>Costo</th></tr></thead>
+  <tbody>${parts.map(p=>`<tr><td>${p._nombre}</td><td>${p._correo}</td><td>${p._gerencia}</td><td>${p._puesto}</td><td>${p._cap?.nombre||'—'}</td><td>${p.horas||0}h</td><td>₡${Math.round(p.costo||0).toLocaleString()}</td></tr>`).join('')}</tbody>
+  </table></div>
 </div>
 <div class="footer">
   <span>ControlCap · Universidad Corporativa · CoopeAnde N.º 1</span>
   <span>Uso interno exclusivo · ${new Date().toLocaleDateString('es-CR')}</span>
 </div>
 </body></html>`
-
     const blob = new Blob([html], { type: 'text/html' })
     const url = URL.createObjectURL(blob)
     const w = window.open(url, '_blank')
@@ -311,58 +332,180 @@ export default function Reportes() {
     setGenerando('excel')
     try {
       const { caps, parts } = await obtenerDatosFiltrados()
-      const wb = XLSX.utils.book_new()
+      const wb = XLSXStyle.utils.book_new()
+      const filtroDesc = getFiltroDesc(caps)
+      const fecha = new Date().toLocaleDateString('es-CR')
 
-      if (!filtroColab) {
-        const porGerencia = {}
-        parts.forEach(p => {
-          const g = p._gerencia || 'Sin gerencia'
-          if (!porGerencia[g]) porGerencia[g] = { partic: 0, horas: 0, costo: 0 }
-          porGerencia[g].partic++
-          porGerencia[g].horas += Number(p.horas || 0)
-          porGerencia[g].costo += Number(p.costo || 0)
-        })
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
-          Object.entries(porGerencia).map(([g, d]) => ({
-            Gerencia: g, Participaciones: d.partic,
-            'Horas totales': d.horas, 'Costo ejecutado (₡)': Math.round(d.costo)
-          }))
-        ), 'Resumen por Gerencia')
-      }
+      const totalPartic = parts.length
+      const totalHoras = parts.reduce((s, p) => s + Number(p.horas || 0), 0)
+      const totalCosto = parts.reduce((s, p) => s + Number(p.costo || 0), 0)
+      const capsUnicas = new Set(parts.map(p => p.capacitacion_id)).size
 
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
-        parts.length ? parts.map(p => ({
-          Colaborador: p._nombre, Correo: p._correo, Género: p.genero || '—',
-          Gerencia: p._gerencia, Departamento: p._departamento, Puesto: p._puesto,
-          Capacitación: p._cap?.nombre || '—', Proveedor: p._cap?.proveedor || '—',
-          Facilitador: p._cap?.facilitador || '—', Categoría: p._cap?.categoria || '—',
-          'Fecha inicio': p._cap?.fecha_inicio || '—',
-          Horas: p.horas || 0, 'Costo (₡)': Math.round(p.costo || 0),
-        })) : [{}]
-      ), 'Participantes')
+      // ── HOJA 1: RESUMEN ───────────────────────────────────────
+      const porGerencia = {}
+      parts.forEach(p => {
+        const g = p._gerencia || 'Sin gerencia'
+        if (!porGerencia[g]) porGerencia[g] = { partic: 0, horas: 0, costo: 0 }
+        porGerencia[g].partic++
+        porGerencia[g].horas += Number(p.horas || 0)
+        porGerencia[g].costo += Number(p.costo || 0)
+      })
 
-      const capsUnicas = [...new Map(parts.map(p => [p.capacitacion_id, p._cap])).values()].filter(Boolean)
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
-        capsUnicas.length ? capsUnicas.map(c => ({
-          Nombre: c.nombre, Proveedor: c.proveedor || '—',
-          Categoría: c.categoria || '—', Modalidad: c.modalidad || '—',
-          Estado: c.estado || '—', Facilitador: c.facilitador || '—',
-          'Fecha inicio': c.fecha_inicio || '—', 'Fecha fin': c.fecha_fin || '—',
-          Horas: c.horas || 0,
-          Participantes: parts.filter(p => p.capacitacion_id === c.id).length,
-          'Costo total (₡)': Math.round(parts.filter(p => p.capacitacion_id === c.id).reduce((s, p) => s + Number(p.costo || 0), 0))
-        })) : [{}]
-      ), 'Capacitaciones')
+      const ws1Data = []
 
-      const filtroFile = [
-        filtroAnio || 'Todos',
-        filtroGerencia ? filtroGerencia.slice(0,10) : '',
-        filtroProveedor ? filtroProveedor.slice(0,10) : '',
-        colabSeleccionado ? colabSeleccionado.nombre.split(' ').slice(0,2).join('_') : ''
-      ].filter(Boolean).join('_')
+      // Título
+      ws1Data.push([titleCell('ControlCap — Informe de Capacitación'), celda(''), celda(''), celda('')])
+      ws1Data.push([subtitleCell(`Universidad Corporativa · CoopeAnde N.º 1 · ${filtroDesc}`), celda(''), celda(''), celda('')])
+      ws1Data.push([subtitleCell(`Generado el ${fecha}`), celda(''), celda(''), celda('')])
+      ws1Data.push([celda(''), celda(''), celda(''), celda('')])
 
-      XLSX.writeFile(wb, `ControlCap_${filtroFile}_${new Date().toISOString().slice(0,10)}.xlsx`)
-    } catch(e) {
+      // KPIs
+      ws1Data.push([
+        kpiLabelCell('CAPACITACIONES'),
+        kpiLabelCell('PARTICIPACIONES'),
+        kpiLabelCell('HORAS IMPARTIDAS'),
+        kpiLabelCell('COSTO EJECUTADO'),
+      ])
+      ws1Data.push([
+        kpiValueCell(capsUnicas, XL.PURPLE),
+        kpiValueCell(totalPartic.toLocaleString(), XL.BLUE),
+        kpiValueCell(`${totalHoras.toLocaleString()}h`, { rgb: 'D97706' }),
+        kpiValueCell(`₡${Math.round(totalCosto).toLocaleString()}`, XL.RED),
+      ])
+      ws1Data.push([celda(''), celda(''), celda(''), celda('')])
+
+      // Header tabla gerencia
+      ws1Data.push([
+        headerCell('GERENCIA'),
+        headerCell('PARTICIPACIONES'),
+        headerCell('HORAS TOTALES'),
+        headerCell('COSTO EJECUTADO (₡)'),
+      ])
+
+      // Datos gerencia
+      const gerArr = Object.entries(porGerencia).sort((a, b) => b[1].partic - a[1].partic)
+      gerArr.forEach(([g, d], i) => {
+        const bg = i % 2 === 0 ? XL.WHITE : { rgb: 'F5EEFF' }
+        ws1Data.push([
+          dataCell(g, { bold: true, bg }),
+          dataCell(d.partic.toLocaleString(), { align: 'center', bg }),
+          dataCell(`${d.horas.toLocaleString()}h`, { align: 'center', bg }),
+          accentCell(`₡${Math.round(d.costo).toLocaleString()}`, XL.RED),
+        ])
+      })
+
+      // Fila total
+      ws1Data.push([
+        dataCell('TOTAL', { bold: true, color: XL.WHITE, bg: XL.NAVY }),
+        dataCell(totalPartic.toLocaleString(), { bold: true, color: XL.WHITE, bg: XL.NAVY, align: 'center' }),
+        dataCell(`${totalHoras.toLocaleString()}h`, { bold: true, color: XL.WHITE, bg: XL.NAVY, align: 'center' }),
+        dataCell(`₡${Math.round(totalCosto).toLocaleString()}`, { bold: true, color: XL.YELLOW, bg: XL.NAVY, align: 'right' }),
+      ])
+
+      const ws1 = XLSXStyle.utils.aoa_to_sheet(ws1Data)
+      ws1['!cols'] = [{ wch: 45 }, { wch: 18 }, { wch: 18 }, { wch: 22 }]
+      ws1['!rows'] = [{ hpt: 28 }, { hpt: 16 }, { hpt: 14 }, { hpt: 10 }, { hpt: 22 }, { hpt: 36 }]
+      ws1['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 3 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: 3 } },
+      ]
+      XLSXStyle.utils.book_append_sheet(wb, ws1, '📊 Resumen')
+
+      // ── HOJA 2: PARTICIPANTES ─────────────────────────────────
+      const ws2Data = []
+      ws2Data.push([titleCell('Detalle de Participantes'), ...Array(11).fill(celda(''))])
+      ws2Data.push([subtitleCell(filtroDesc), ...Array(11).fill(celda(''))])
+      ws2Data.push(Array(12).fill(celda('')))
+      ws2Data.push([
+        headerCell('COLABORADOR'),
+        headerCell('CORREO'),
+        headerCell('GÉNERO'),
+        headerCell('GERENCIA'),
+        headerCell('DEPARTAMENTO'),
+        headerCell('PUESTO'),
+        headerCell('CAPACITACIÓN'),
+        headerCell('PROVEEDOR', XL.PURPLE),
+        headerCell('CATEGORÍA', XL.PURPLE),
+        headerCell('FACILITADOR', XL.PURPLE),
+        headerCell('HORAS', XL.BLUE),
+        headerCell('COSTO (₡)', XL.RED),
+      ])
+
+      parts.forEach((p, i) => {
+        const bg = i % 2 === 0 ? XL.WHITE : XL.LIGHT
+        ws2Data.push([
+          dataCell(p._nombre, { bold: true, bg }),
+          dataCell(p._correo, { color: XL.BLUE, bg }),
+          dataCell(p.genero === 'FEMENINO' ? 'F' : p.genero === 'MASCULINO' ? 'M' : '—', { align: 'center', bg }),
+          dataCell(p._gerencia, { bg }),
+          dataCell(p._departamento, { bg }),
+          dataCell(p._puesto, { bg }),
+          dataCell(p._cap?.nombre || '—', { bg }),
+          dataCell(p._cap?.proveedor || '—', { bg }),
+          dataCell(p._cap?.categoria || '—', { bg }),
+          dataCell(p._cap?.facilitador || '—', { bg }),
+          dataCell(`${p.horas || 0}h`, { align: 'center', color: XL.GREEN, bold: true, bg }),
+          accentCell(`₡${Math.round(p.costo || 0).toLocaleString()}`, XL.RED),
+        ])
+      })
+
+      const ws2 = XLSXStyle.utils.aoa_to_sheet(ws2Data)
+      ws2['!cols'] = [{ wch: 30 }, { wch: 28 }, { wch: 8 }, { wch: 25 }, { wch: 22 }, { wch: 25 }, { wch: 35 }, { wch: 25 }, { wch: 25 }, { wch: 20 }, { wch: 8 }, { wch: 16 }]
+      ws2['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 11 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 11 } },
+      ]
+      XLSXStyle.utils.book_append_sheet(wb, ws2, '👥 Participantes')
+
+      // ── HOJA 3: CAPACITACIONES ────────────────────────────────
+      const capsUnicasArr = [...new Map(parts.map(p => [p.capacitacion_id, p._cap])).values()].filter(Boolean)
+      const ws3Data = []
+      ws3Data.push([titleCell('Capacitaciones'), ...Array(9).fill(celda(''))])
+      ws3Data.push([subtitleCell(filtroDesc), ...Array(9).fill(celda(''))])
+      ws3Data.push(Array(10).fill(celda('')))
+      ws3Data.push([
+        headerCell('NOMBRE'),
+        headerCell('PROVEEDOR', XL.PURPLE),
+        headerCell('CATEGORÍA', XL.PURPLE),
+        headerCell('MODALIDAD'),
+        headerCell('ESTADO'),
+        headerCell('FACILITADOR'),
+        headerCell('FECHA INICIO'),
+        headerCell('HORAS', XL.BLUE),
+        headerCell('PARTICIPANTES', XL.BLUE),
+        headerCell('COSTO TOTAL (₡)', XL.RED),
+      ])
+
+      capsUnicasArr.forEach((c, i) => {
+        const bg = i % 2 === 0 ? XL.WHITE : XL.LIGHT
+        const ps = parts.filter(p => p.capacitacion_id === c.id)
+        const ct = ps.reduce((s, p) => s + Number(p.costo || 0), 0)
+        ws3Data.push([
+          dataCell(c.nombre, { bold: true, bg }),
+          dataCell(c.proveedor || '—', { bg }),
+          dataCell(c.categoria || '—', { color: XL.PURPLE, bg }),
+          dataCell(c.modalidad || '—', { bg }),
+          dataCell(c.estado || '—', { bg }),
+          dataCell(c.facilitador || '—', { bg }),
+          dataCell(c.fecha_inicio || '—', { align: 'center', bg }),
+          dataCell(`${c.horas || 0}h`, { align: 'center', color: XL.BLUE, bold: true, bg }),
+          dataCell(ps.length.toString(), { align: 'center', color: XL.BLUE, bold: true, bg }),
+          accentCell(`₡${Math.round(ct).toLocaleString()}`, XL.RED),
+        ])
+      })
+
+      const ws3 = XLSXStyle.utils.aoa_to_sheet(ws3Data)
+      ws3['!cols'] = [{ wch: 40 }, { wch: 25 }, { wch: 25 }, { wch: 12 }, { wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 14 }, { wch: 18 }]
+      ws3['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 9 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 9 } },
+      ]
+      XLSXStyle.utils.book_append_sheet(wb, ws3, '🎓 Capacitaciones')
+
+      const filtroFile = [filtroAnio || 'Todos', filtroGerencia ? filtroGerencia.slice(0, 10) : '', filtroProveedor ? filtroProveedor.slice(0, 10) : '', colabSeleccionado ? colabSeleccionado.nombre.split(' ').slice(0, 2).join('_') : ''].filter(Boolean).join('_')
+      XLSXStyle.writeFile(wb, `ControlCap_${filtroFile}_${new Date().toISOString().slice(0, 10)}.xlsx`)
+    } catch (e) {
       alert('Error generando Excel: ' + e.message)
     }
     setGenerando('')
@@ -384,18 +527,12 @@ export default function Reportes() {
         porGerencia[g].horas += Number(p.horas || 0)
         porGerencia[g].costo += Number(p.costo || 0)
       })
-      const gerArr = Object.entries(porGerencia).sort((a,b) => b[1].partic - a[1].partic).slice(0, 8)
-
+      const gerArr = Object.entries(porGerencia).sort((a, b) => b[1].partic - a[1].partic).slice(0, 8)
       const pptx = new PptxGenJS()
       pptx.layout = 'LAYOUT_WIDE'
-
-      const NAVY='1B2560', YELLOW='FFCF00', WHITE='FFFFFF'
-      const PURPLE='8131B0', BLUE='0072DA', RED='DA2B1F'
-      const LIGHT='F8FAFC', GRAY='64748B'
-
+      const NAVY='1B2560', YELLOW='FFCF00', WHITE='FFFFFF', PURPLE='8131B0', BLUE='0072DA', RED='DA2B1F', LIGHT='F8FAFC', GRAY='64748B'
       const filtroDesc = getFiltroDesc(caps)
 
-      // Slide 1: Portada
       const s1 = pptx.addSlide()
       s1.background = { color: NAVY }
       s1.addShape(pptx.ShapeType.rect, { x:0, y:4.5, w:13.33, h:3.0, fill:{color:PURPLE}, line:{color:PURPLE} })
@@ -407,7 +544,6 @@ export default function Reportes() {
       s1.addText(new Date().toLocaleDateString('es-CR',{year:'numeric',month:'long',day:'numeric'}), { x:0.6, y:4.7, w:8, h:0.4, fontSize:13, color:WHITE, fontFace:'Arial' })
       s1.addText('Uso interno exclusivo', { x:0.6, y:5.2, w:8, h:0.35, fontSize:11, color:'AAAACC', fontFace:'Arial' })
 
-      // Slide 2: KPIs
       const s2 = pptx.addSlide()
       s2.background = { color: LIGHT }
       s2.addText('Resumen Ejecutivo', { x:0.5, y:0.3, w:12, h:0.6, fontSize:24, bold:true, color:NAVY, fontFace:'Arial' })
@@ -426,7 +562,6 @@ export default function Reportes() {
         s2.addText(k.val, { x:x+0.2, y:2.05, w:2.6, h:0.8, fontSize:24, bold:true, color:k.color, fontFace:'Arial' })
       })
 
-      // Slide 3: Por gerencia
       if (!filtroColab && gerArr.length > 0) {
         const s3 = pptx.addSlide()
         s3.background = { color: WHITE }
@@ -434,16 +569,14 @@ export default function Reportes() {
         const maxP = Math.max(...gerArr.map(([,d])=>d.partic),1)
         gerArr.forEach(([g,d],i) => {
           const y = 1.1 + i * 0.72
-          const barW = (d.partic/maxP)*7.5
           const label = g.replace('Gerencia de ','').replace('Gerencia ','').replace('Gerencia De ','')
           s3.addText(label.length>28?label.slice(0,26)+'...':label, { x:0.4, y, w:3.8, h:0.45, fontSize:11, color:NAVY, fontFace:'Arial', valign:'middle' })
           s3.addShape(pptx.ShapeType.rect, { x:4.3, y:y+0.05, w:8.0, h:0.35, fill:{color:'E2E8F0'}, line:{color:'E2E8F0'} })
-          s3.addShape(pptx.ShapeType.rect, { x:4.3, y:y+0.05, w:Math.max(barW,0.1), h:0.35, fill:{color:BLUE}, line:{color:BLUE} })
+          s3.addShape(pptx.ShapeType.rect, { x:4.3, y:y+0.05, w:Math.max((d.partic/maxP)*7.5,0.1), h:0.35, fill:{color:BLUE}, line:{color:BLUE} })
           s3.addText(d.partic.toString(), { x:12.4, y, w:0.8, h:0.45, fontSize:11, bold:true, color:BLUE, fontFace:'Arial', align:'right' })
         })
       }
 
-      // Slide 4: Perfil colaborador
       if (colabSeleccionado) {
         const s4 = pptx.addSlide()
         s4.background = { color: LIGHT }
@@ -454,19 +587,14 @@ export default function Reportes() {
         s4.addText(colabSeleccionado.puesto||'—', { x:5.5, y:1.65, w:5, h:0.35, fontSize:13, color:GRAY, fontFace:'Arial' })
         const capCount = {}
         parts.forEach(p => {
-          const id = p.capacitacion_id
-          if (!capCount[id]) capCount[id] = { nombre:p._cap?.nombre||'—', horas:0, costo:0 }
-          capCount[id].horas += Number(p.horas||0)
-          capCount[id].costo += Number(p.costo||0)
+          if (!capCount[p.capacitacion_id]) capCount[p.capacitacion_id] = { nombre:p._cap?.nombre||'—', horas:0, costo:0 }
+          capCount[p.capacitacion_id].horas += Number(p.horas||0)
+          capCount[p.capacitacion_id].costo += Number(p.costo||0)
         })
         const capsList = Object.values(capCount).slice(0,10)
         if (capsList.length > 0) {
           const rows = [
-            [
-              { text:'Capacitación', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10} },
-              { text:'Horas', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },
-              { text:'Costo', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'right'} },
-            ],
+            [{ text:'Capacitación', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10} },{ text:'Horas', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },{ text:'Costo', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'right'} }],
             ...capsList.map((c,i)=>[
               { text:c.nombre.length>60?c.nombre.slice(0,58)+'...':c.nombre, options:{fontSize:10,fill:i%2===0?WHITE:LIGHT} },
               { text:c.horas+'h', options:{fontSize:10,align:'center',fill:i%2===0?WHITE:LIGHT} },
@@ -477,17 +605,15 @@ export default function Reportes() {
         }
       }
 
-      // Slide 5: Top Capacitaciones
       const s5 = pptx.addSlide()
       s5.background = { color: LIGHT }
       s5.addText('Top Capacitaciones', { x:0.5, y:0.3, w:12, h:0.55, fontSize:22, bold:true, color:NAVY, fontFace:'Arial' })
       const capCount2 = {}
       parts.forEach(p => {
-        const id = p.capacitacion_id
-        if (!capCount2[id]) capCount2[id] = { nombre:p._cap?.nombre||'—', proveedor:p._cap?.proveedor||'—', partic:0, horas:0, costo:0 }
-        capCount2[id].partic++
-        capCount2[id].horas += Number(p.horas||0)
-        capCount2[id].costo += Number(p.costo||0)
+        if (!capCount2[p.capacitacion_id]) capCount2[p.capacitacion_id] = { nombre:p._cap?.nombre||'—', proveedor:p._cap?.proveedor||'—', partic:0, horas:0, costo:0 }
+        capCount2[p.capacitacion_id].partic++
+        capCount2[p.capacitacion_id].horas += Number(p.horas||0)
+        capCount2[p.capacitacion_id].costo += Number(p.costo||0)
       })
       const topCaps = Object.values(capCount2).sort((a,b)=>b.partic-a.partic).slice(0,8)
       if (topCaps.length > 0) {
@@ -510,7 +636,6 @@ export default function Reportes() {
         s5.addTable(rows2, { x:0.5, y:1.0, w:12.3, colW:[5.8,2.5,1.0,1.0,2.0], border:{type:'solid',pt:0.5,color:'E2E8F0'} })
       }
 
-      // Slide 6: Cierre
       const s6 = pptx.addSlide()
       s6.background = { color: NAVY }
       s6.addShape(pptx.ShapeType.rect, { x:0, y:3.2, w:13.33, h:0.08, fill:{color:YELLOW}, line:{color:YELLOW} })
@@ -523,9 +648,7 @@ export default function Reportes() {
 
       const filtroFile = [filtroAnio||'Todos', filtroGerencia?filtroGerencia.slice(0,10):'', filtroProveedor?filtroProveedor.slice(0,10):'', colabSeleccionado?colabSeleccionado.nombre.split(' ').slice(0,2).join('_'):''].filter(Boolean).join('_')
       await pptx.writeFile({ fileName: `ControlCap_${filtroFile}_${new Date().toISOString().slice(0,10)}.pptx` })
-    } catch(e) {
-      alert('Error generando PowerPoint: ' + e.message)
-    }
+    } catch(e) { alert('Error generando PowerPoint: ' + e.message) }
     setGenerando('')
   }
 
@@ -538,7 +661,6 @@ export default function Reportes() {
       <div style={{ background:'white', borderRadius:'12px', padding:'20px', marginBottom:'20px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)' }}>
         <div style={{ fontSize:'13px', fontWeight:'600', color:'#1E293B', marginBottom:'14px' }}>🔍 Filtros del reporte</div>
         <div style={{ display:'flex', gap:'12px', flexWrap:'wrap', alignItems:'flex-start' }}>
-
           <div style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
             <label style={{ fontSize:'10px', color:'#94A3B8', fontWeight:'600', textTransform:'uppercase' }}>Año</label>
             <select value={filtroAnio} onChange={e => { setFiltroAnio(e.target.value); setFiltroCap('') }} style={{ ...inp, width:'120px' }}>
@@ -546,7 +668,6 @@ export default function Reportes() {
               {ANIOS.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
           </div>
-
           <div style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
             <label style={{ fontSize:'10px', color:'#94A3B8', fontWeight:'600', textTransform:'uppercase' }}>Gerencia</label>
             <select value={filtroGerencia} onChange={e => setFiltroGerencia(e.target.value)} style={{ ...inp, width:'220px' }}>
@@ -554,7 +675,6 @@ export default function Reportes() {
               {gerencias.map(g => <option key={g} value={g}>{g}</option>)}
             </select>
           </div>
-
           {filtroGerencia && departamentos.length > 0 && (
             <div style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
               <label style={{ fontSize:'10px', color:'#94A3B8', fontWeight:'600', textTransform:'uppercase' }}>Departamento</label>
@@ -564,7 +684,6 @@ export default function Reportes() {
               </select>
             </div>
           )}
-
           <div style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
             <label style={{ fontSize:'10px', color:'#94A3B8', fontWeight:'600', textTransform:'uppercase' }}>Proveedor</label>
             <select value={filtroProveedor} onChange={e => { setFiltroProveedor(e.target.value); setFiltroCap('') }} style={{ ...inp, width:'220px' }}>
@@ -572,7 +691,6 @@ export default function Reportes() {
               {proveedores.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </div>
-
           <div style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
             <label style={{ fontSize:'10px', color:'#94A3B8', fontWeight:'600', textTransform:'uppercase' }}>Capacitación</label>
             <select value={filtroCap} onChange={e => setFiltroCap(e.target.value)} style={{ ...inp, width:'250px' }}>
@@ -580,20 +698,14 @@ export default function Reportes() {
               {capsDelProvAnio.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
           </div>
-
           <div style={{ display:'flex', flexDirection:'column', gap:'4px', position:'relative' }}>
             <label style={{ fontSize:'10px', color:'#94A3B8', fontWeight:'600', textTransform:'uppercase' }}>Colaborador</label>
             <div style={{ position:'relative' }}>
-              <input
-                type="text"
-                placeholder="Buscar colaborador..."
-                value={busquedaColab}
+              <input type="text" placeholder="Buscar colaborador..." value={busquedaColab}
                 onChange={e => { setBusquedaColab(e.target.value); if (colabSeleccionado) limpiarColab() }}
-                style={{ ...inp, width:'220px', paddingRight:colabSeleccionado?'28px':'10px' }}
-              />
+                style={{ ...inp, width:'220px', paddingRight:colabSeleccionado?'28px':'10px' }} />
               {colabSeleccionado && (
-                <button onClick={limpiarColab}
-                  style={{ position:'absolute', right:'8px', top:'50%', transform:'translateY(-50%)', background:'none', border:'none', cursor:'pointer', color:'#94A3B8', fontSize:'14px' }}>✕</button>
+                <button onClick={limpiarColab} style={{ position:'absolute', right:'8px', top:'50%', transform:'translateY(-50%)', background:'none', border:'none', cursor:'pointer', color:'#94A3B8', fontSize:'14px' }}>✕</button>
               )}
               {resultadosColab.length > 0 && (
                 <div style={{ position:'absolute', top:'40px', left:0, width:'280px', background:'white', border:'1px solid #E2E8F0', borderRadius:'8px', boxShadow:'0 4px 12px rgba(0,0,0,0.1)', zIndex:50, maxHeight:'200px', overflowY:'auto' }}>
@@ -610,7 +722,6 @@ export default function Reportes() {
               )}
             </div>
           </div>
-
           {(filtroAnio || filtroGerencia || filtroDep || filtroCap || filtroColab || filtroProveedor) && (
             <div style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
               <label style={{ fontSize:'10px', color:'transparent' }}>-</label>
@@ -642,8 +753,8 @@ export default function Reportes() {
       <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:'16px' }}>
         {[
           { id:'pdf', icon:'📄', titulo:'PDF Ejecutivo', desc:'Informe completo con KPIs, resumen por gerencia, capacitaciones y detalle de participantes.', color:COLORS.rojo, accion:generarPDF, boton:'Generar PDF' },
-          { id:'excel', icon:'📊', titulo:'Excel Detallado', desc:'Hojas con resumen por gerencia, participantes completos y capacitaciones.', color:'#0F9B72', accion:generarExcel, boton:'Descargar Excel' },
-          { id:'pptx', icon:'📽️', titulo:'PowerPoint Ejecutivo', desc:'Presentación con portada, KPIs, gráficas y top capacitaciones.', color:COLORS.morado, accion:generarPPTX, boton:'Descargar PPTX' },
+          { id:'excel', icon:'📊', titulo:'Excel Estilizado', desc:'3 hojas con diseño CoopeAnde: Resumen con KPIs, Participantes y Capacitaciones con colores y estilos.', color:'#0F9B72', accion:generarExcel, boton:'Descargar Excel' },
+          { id:'pptx', icon:'📽️', titulo:'PowerPoint Ejecutivo', desc:'Presentación con portada, KPIs, gráficas por gerencia, costo ejecutado y top capacitaciones.', color:COLORS.morado, accion:generarPPTX, boton:'Descargar PPTX' },
         ].map(r => (
           <div key={r.id} style={{ background:'white', borderRadius:'16px', padding:'24px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', border:`1px solid ${r.color}22` }}>
             <div style={{ fontSize:'32px', marginBottom:'10px' }}>{r.icon}</div>
