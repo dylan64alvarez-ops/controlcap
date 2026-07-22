@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import XLSXStyle from 'xlsx-js-style'
 import PptxGenJS from 'pptxgenjs'
@@ -19,26 +19,18 @@ const XL = {
   RED:    { rgb: 'DA2B1F' },
   WHITE:  { rgb: 'FFFFFF' },
   LIGHT:  { rgb: 'F8FAFC' },
-  LIGHT2: { rgb: 'EEF0FF' },
   GRAY:   { rgb: '64748B' },
   GREEN:  { rgb: '0F9B72' },
 }
 
-function celda(valor, estilo = {}) {
-  return { v: valor ?? '', s: estilo }
-}
+function celda(valor, estilo = {}) { return { v: valor ?? '', s: estilo } }
 
 function headerCell(valor, bgColor = XL.NAVY) {
   return celda(valor, {
     font: { bold: true, color: XL.WHITE, sz: 11, name: 'Arial' },
     fill: { fgColor: bgColor },
     alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
-    border: {
-      top: { style: 'thin', color: XL.WHITE },
-      bottom: { style: 'thin', color: XL.WHITE },
-      left: { style: 'thin', color: XL.WHITE },
-      right: { style: 'thin', color: XL.WHITE },
-    }
+    border: { top: { style: 'thin', color: XL.WHITE }, bottom: { style: 'thin', color: XL.WHITE }, left: { style: 'thin', color: XL.WHITE }, right: { style: 'thin', color: XL.WHITE } }
   })
 }
 
@@ -48,60 +40,28 @@ function dataCell(valor, opciones = {}) {
     font: { bold, color, sz, name: 'Arial' },
     fill: { fgColor: bg },
     alignment: { horizontal: align, vertical: 'center', wrapText: false },
-    border: {
-      top: { style: 'hair', color: { rgb: 'E2E8F0' } },
-      bottom: { style: 'hair', color: { rgb: 'E2E8F0' } },
-      left: { style: 'hair', color: { rgb: 'E2E8F0' } },
-      right: { style: 'hair', color: { rgb: 'E2E8F0' } },
-    }
+    border: { top: { style: 'hair', color: { rgb: 'E2E8F0' } }, bottom: { style: 'hair', color: { rgb: 'E2E8F0' } }, left: { style: 'hair', color: { rgb: 'E2E8F0' } }, right: { style: 'hair', color: { rgb: 'E2E8F0' } } }
   })
 }
 
 function titleCell(valor) {
-  return celda(valor, {
-    font: { bold: true, sz: 16, color: XL.NAVY, name: 'Arial' },
-    fill: { fgColor: XL.WHITE },
-    alignment: { horizontal: 'left', vertical: 'center' },
-  })
+  return celda(valor, { font: { bold: true, sz: 16, color: XL.NAVY, name: 'Arial' }, fill: { fgColor: XL.WHITE }, alignment: { horizontal: 'left', vertical: 'center' } })
 }
 
 function subtitleCell(valor) {
-  return celda(valor, {
-    font: { sz: 10, color: XL.GRAY, name: 'Arial', italic: true },
-    fill: { fgColor: XL.WHITE },
-    alignment: { horizontal: 'left', vertical: 'center' },
-  })
+  return celda(valor, { font: { sz: 10, color: XL.GRAY, name: 'Arial', italic: true }, fill: { fgColor: XL.WHITE }, alignment: { horizontal: 'left', vertical: 'center' } })
 }
 
 function kpiLabelCell(valor) {
-  return celda(valor, {
-    font: { bold: true, sz: 9, color: XL.GRAY, name: 'Arial' },
-    fill: { fgColor: XL.LIGHT },
-    alignment: { horizontal: 'center', vertical: 'center' },
-    border: { bottom: { style: 'thin', color: XL.PURPLE } }
-  })
+  return celda(valor, { font: { bold: true, sz: 9, color: XL.GRAY, name: 'Arial' }, fill: { fgColor: XL.LIGHT }, alignment: { horizontal: 'center', vertical: 'center' }, border: { bottom: { style: 'thin', color: XL.PURPLE } } })
 }
 
 function kpiValueCell(valor, color = XL.PURPLE) {
-  return celda(valor, {
-    font: { bold: true, sz: 18, color, name: 'Arial' },
-    fill: { fgColor: XL.LIGHT },
-    alignment: { horizontal: 'center', vertical: 'center' },
-  })
+  return celda(valor, { font: { bold: true, sz: 18, color, name: 'Arial' }, fill: { fgColor: XL.LIGHT }, alignment: { horizontal: 'center', vertical: 'center' } })
 }
 
 function accentCell(valor, color = XL.PURPLE) {
-  return celda(valor, {
-    font: { bold: true, sz: 10, color, name: 'Arial' },
-    fill: { fgColor: XL.WHITE },
-    alignment: { horizontal: 'right', vertical: 'center' },
-    border: {
-      top: { style: 'hair', color: { rgb: 'E2E8F0' } },
-      bottom: { style: 'hair', color: { rgb: 'E2E8F0' } },
-      left: { style: 'hair', color: { rgb: 'E2E8F0' } },
-      right: { style: 'hair', color: { rgb: 'E2E8F0' } },
-    }
-  })
+  return celda(valor, { font: { bold: true, sz: 10, color, name: 'Arial' }, fill: { fgColor: XL.WHITE }, alignment: { horizontal: 'right', vertical: 'center' }, border: { top: { style: 'hair', color: { rgb: 'E2E8F0' } }, bottom: { style: 'hair', color: { rgb: 'E2E8F0' } }, left: { style: 'hair', color: { rgb: 'E2E8F0' } }, right: { style: 'hair', color: { rgb: 'E2E8F0' } } } })
 }
 
 export default function Reportes() {
@@ -109,9 +69,11 @@ export default function Reportes() {
   const [filtroAnio, setFiltroAnio] = useState('2026')
   const [filtroGerencia, setFiltroGerencia] = useState('')
   const [filtroDep, setFiltroDep] = useState('')
-  const [filtroCap, setFiltroCap] = useState('')
-  const [filtroColab, setFiltroColab] = useState('')
   const [filtroProveedor, setFiltroProveedor] = useState('')
+  const [capsSeleccionadas, setCapsSeleccionadas] = useState([])
+  const [busquedaCaps, setBusquedaCaps] = useState('')
+  const [mostrarSelectorCaps, setMostrarSelectorCaps] = useState(false)
+  const [filtroColab, setFiltroColab] = useState('')
   const [busquedaColab, setBusquedaColab] = useState('')
   const [resultadosColab, setResultadosColab] = useState([])
   const [colabSeleccionado, setColabSeleccionado] = useState(null)
@@ -122,9 +84,21 @@ export default function Reportes() {
   const [colaboradores, setColaboradores] = useState([])
   const [preview, setPreview] = useState(null)
   const [cargandoPreview, setCargandoPreview] = useState(false)
+  const selectorRef = useRef(null)
 
   useEffect(() => { cargarCatalogos() }, [])
-  useEffect(() => { cargarPreview() }, [filtroAnio, filtroGerencia, filtroDep, filtroCap, filtroColab, filtroProveedor])
+  useEffect(() => { cargarPreview() }, [filtroAnio, filtroGerencia, filtroDep, filtroProveedor, capsSeleccionadas, filtroColab])
+
+  // Cerrar selector de caps al hacer click fuera
+  useEffect(() => {
+    function handleClick(e) {
+      if (selectorRef.current && !selectorRef.current.contains(e.target)) {
+        setMostrarSelectorCaps(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
 
   async function cargarCatalogos() {
     const [colRes, capRes] = await Promise.all([
@@ -147,40 +121,93 @@ export default function Reportes() {
     })
   }, [filtroGerencia])
 
+  // Búsqueda colaborador — busca en colaboradores activos Y en participantes por nombre_colab
   useEffect(() => {
     if (!busquedaColab || busquedaColab.length < 2) { setResultadosColab([]); return }
     const b = busquedaColab.toLowerCase()
-    setResultadosColab(colaboradores.filter(c =>
+
+    // Buscar en colaboradores activos
+    const activos = colaboradores.filter(c =>
       c.nombre?.toLowerCase().includes(b) || c.correo?.toLowerCase().includes(b)
-    ).slice(0, 8))
+    ).map(c => ({ ...c, tipo: 'activo' }))
+
+    // Buscar en participantes por nombre_colab (históricos)
+    supabase.from('participantes')
+      .select('nombre_colab, correo, gerencia_colab')
+      .ilike('nombre_colab', `%${b}%`)
+      .limit(20)
+      .then(({ data }) => {
+        if (!data) return
+        const historicos = []
+        const correosVistos = new Set(activos.map(c => c.correo?.toLowerCase()))
+        data.forEach(p => {
+          const correo = p.correo && !p.correo.startsWith('sin-correo__') ? p.correo : null
+          if (correo && !correosVistos.has(correo)) {
+            correosVistos.add(correo)
+            historicos.push({
+              id: correo,
+              nombre: p.nombre_colab,
+              correo: correo,
+              gerencia: p.gerencia_colab || '—',
+              tipo: 'historico'
+            })
+          }
+        })
+        setResultadosColab([...activos.slice(0, 5), ...historicos.slice(0, 5)])
+      })
   }, [busquedaColab, colaboradores])
 
   function seleccionarColab(col) {
-    setColabSeleccionado(col); setFiltroColab(col.correo)
-    setBusquedaColab(col.nombre); setResultadosColab([])
+    setColabSeleccionado(col)
+    setFiltroColab(col.correo)
+    setBusquedaColab(col.nombre)
+    setResultadosColab([])
   }
+
   function limpiarColab() {
-    setColabSeleccionado(null); setFiltroColab('')
-    setBusquedaColab(''); setResultadosColab([])
+    setColabSeleccionado(null)
+    setFiltroColab('')
+    setBusquedaColab('')
+    setResultadosColab([])
   }
+
+  // Capacitaciones filtradas para el selector
+  const capsParaSelector = capacitaciones.filter(c => {
+    const matchAnio = !filtroAnio || c.fecha_inicio?.startsWith(filtroAnio)
+    const matchProv = !filtroProveedor || c.proveedor === filtroProveedor
+    const matchBusq = !busquedaCaps || c.nombre?.toLowerCase().includes(busquedaCaps.toLowerCase())
+    return matchAnio && matchProv && matchBusq
+  })
+
+  function toggleCap(cap) {
+    setCapsSeleccionadas(prev => {
+      const yaEsta = prev.find(c => c.id === cap.id)
+      if (yaEsta) return prev.filter(c => c.id !== cap.id)
+      return [...prev, cap]
+    })
+  }
+
+  function limpiarCaps() { setCapsSeleccionadas([]) }
 
   async function obtenerDatosFiltrados() {
-    const hayFiltrosCap = filtroAnio || filtroProveedor || filtroCap
+    const hayFiltrosCap = filtroAnio || filtroProveedor || capsSeleccionadas.length > 0
 
-    // Siempre cargar TODAS las capacitaciones para lookup
     const { data: todasLasCaps } = await supabase.from('capacitaciones').select('*')
     const capsLookup = todasLasCaps || []
 
-    // Filtrar capacitaciones según filtros activos
     let capsParaFiltro = capsLookup
-    if (filtroAnio) capsParaFiltro = capsParaFiltro.filter(c => c.fecha_inicio?.startsWith(filtroAnio))
-    if (filtroProveedor) capsParaFiltro = capsParaFiltro.filter(c => c.proveedor === filtroProveedor)
-    if (filtroCap) capsParaFiltro = capsParaFiltro.filter(c => c.id === filtroCap)
+    if (capsSeleccionadas.length > 0) {
+      // Si hay caps seleccionadas manualmente, usar solo esas
+      const idsSeleccionados = capsSeleccionadas.map(c => c.id)
+      capsParaFiltro = capsLookup.filter(c => idsSeleccionados.includes(c.id))
+    } else {
+      if (filtroAnio) capsParaFiltro = capsParaFiltro.filter(c => c.fecha_inicio?.startsWith(filtroAnio))
+      if (filtroProveedor) capsParaFiltro = capsParaFiltro.filter(c => c.proveedor === filtroProveedor)
+    }
 
     const capIds = capsParaFiltro.map(c => c.id)
     if (hayFiltrosCap && capIds.length === 0) return { caps: capsParaFiltro, parts: [], cols: [] }
 
-    // Cargar colaboradores
     const { data: cols } = await supabase.from('colaboradores').select('*')
     const colById = {}, colByCorreo = {}, colByNombre = {}
     ;(cols || []).forEach(c => {
@@ -189,20 +216,13 @@ export default function Reportes() {
       if (c.nombre) colByNombre[c.nombre.toUpperCase().trim()] = c
     })
 
-    // ── Cargar participantes con paginación correcta ──────────
     let partsRaw = []
-
     if (hayFiltrosCap && capIds.length > 0) {
-      // Dividir capIds en lotes de 400 Y paginar cada lote
       for (let i = 0; i < capIds.length; i += 400) {
         const lote = capIds.slice(i, i + 400)
         let desde = 0
         while (true) {
-          let qLote = supabase
-            .from('participantes')
-            .select('*')
-            .in('capacitacion_id', lote)
-            .range(desde, desde + 999)
+          let qLote = supabase.from('participantes').select('*').in('capacitacion_id', lote).range(desde, desde + 999)
           if (filtroColab) qLote = qLote.eq('correo', filtroColab)
           const { data: pLote } = await qLote
           if (!pLote || pLote.length === 0) break
@@ -212,13 +232,9 @@ export default function Reportes() {
         }
       }
     } else {
-      // Sin filtros de cap: paginar todos
       let desde = 0
       while (true) {
-        let qPage = supabase
-          .from('participantes')
-          .select('*')
-          .range(desde, desde + 999)
+        let qPage = supabase.from('participantes').select('*').range(desde, desde + 999)
         if (filtroColab) qPage = qPage.eq('correo', filtroColab)
         const { data: pagina } = await qPage
         if (!pagina || pagina.length === 0) break
@@ -228,14 +244,10 @@ export default function Reportes() {
       }
     }
 
-    // Enriquecer participantes
     let parts = partsRaw.map(p => {
       const cap = capsLookup.find(c => c.id === p.capacitacion_id)
-      const col = colById[p.colaborador_id] ||
-        colByCorreo[p.correo?.toLowerCase().trim()] ||
-        colByNombre[p.nombre_colab?.toUpperCase().trim()] || null
-      const correoResuelto = col?.correo ||
-        (p.correo && !p.correo.startsWith('sin-correo__') ? p.correo : null) || null
+      const col = colById[p.colaborador_id] || colByCorreo[p.correo?.toLowerCase().trim()] || colByNombre[p.nombre_colab?.toUpperCase().trim()] || null
+      const correoResuelto = col?.correo || (p.correo && !p.correo.startsWith('sin-correo__') ? p.correo : null) || null
       return {
         ...p, _cap: cap, _col: col,
         _nombre: col?.nombre || p.nombre_colab || '—',
@@ -243,6 +255,7 @@ export default function Reportes() {
         _gerencia: col?.gerencia || p.gerencia_colab || '—',
         _departamento: col?.departamento || p.departamento_colab || '—',
         _puesto: col?.puesto || p.puesto_colab || '—',
+        _fecha: cap?.fecha_inicio || '—',
       }
     })
 
@@ -272,12 +285,14 @@ export default function Reportes() {
   }
 
   function getFiltroDesc(caps) {
+    if (capsSeleccionadas.length > 0) {
+      return `${capsSeleccionadas.length} capacitación(es) seleccionada(s)`
+    }
     return [
       filtroAnio ? `Año ${filtroAnio}` : 'Todos los años',
       filtroGerencia || '', filtroDep || '',
       filtroProveedor ? `Proveedor: ${filtroProveedor}` : '',
       colabSeleccionado ? `Colaborador: ${colabSeleccionado.nombre}` : '',
-      filtroCap ? caps?.find(c => c.id === filtroCap)?.nombre || '' : ''
     ].filter(Boolean).join(' · ')
   }
 
@@ -349,16 +364,16 @@ export default function Reportes() {
     `<tr><td>${g}</td><td>${d.partic}</td><td>${d.horas.toLocaleString()}h</td><td>₡${Math.round(d.costo).toLocaleString()}</td></tr>`
   ).join('')}</tbody></table></div>`}
   <div class="section"><div class="section-title">Capacitaciones</div>
-  <table><thead><tr><th>Nombre</th><th>Proveedor</th><th>Facilitador</th><th>Horas</th><th>Participantes</th><th>Costo total</th></tr></thead>
+  <table><thead><tr><th>Nombre</th><th>Fecha</th><th>Proveedor</th><th>Facilitador</th><th>Horas</th><th>Participantes</th><th>Costo total</th></tr></thead>
   <tbody>${[...new Map(parts.map(p=>[p.capacitacion_id,p._cap])).values()].filter(Boolean).map(c=>{
     const ps=parts.filter(p=>p.capacitacion_id===c.id)
     const ct=ps.reduce((s,p)=>s+Number(p.costo||0),0)
-    return `<tr><td>${c.nombre}</td><td>${c.proveedor||'—'}</td><td>${c.facilitador||'—'}</td><td>${c.horas}h</td><td>${ps.length}</td><td>₡${Math.round(ct).toLocaleString()}</td></tr>`
+    return `<tr><td>${c.nombre}</td><td>${c.fecha_inicio||'—'}</td><td>${c.proveedor||'—'}</td><td>${c.facilitador||'—'}</td><td>${c.horas}h</td><td>${ps.length}</td><td>₡${Math.round(ct).toLocaleString()}</td></tr>`
   }).join('')}</tbody></table></div>
   <div class="section"><div class="section-title">Detalle de Participantes</div>
-  <table><thead><tr><th>Colaborador</th><th>Correo</th><th>Gerencia</th><th>Puesto</th><th>Capacitación</th><th>Horas</th><th>Costo</th></tr></thead>
+  <table><thead><tr><th>Colaborador</th><th>Correo</th><th>Gerencia</th><th>Puesto</th><th>Capacitación</th><th>Fecha</th><th>Horas</th><th>Costo</th></tr></thead>
   <tbody>${parts.map(p=>`
-    <tr><td>${p._nombre}</td><td>${p._correo}</td><td>${p._gerencia}</td><td>${p._puesto}</td><td>${p._cap?.nombre||'—'}</td><td>${p.horas||0}h</td><td>₡${Math.round(p.costo||0).toLocaleString()}</td></tr>`).join('')}
+    <tr><td>${p._nombre}</td><td>${p._correo}</td><td>${p._gerencia}</td><td>${p._puesto}</td><td>${p._cap?.nombre||'—'}</td><td>${p._fecha}</td><td>${p.horas||0}h</td><td>₡${Math.round(p.costo||0).toLocaleString()}</td></tr>`).join('')}
   </tbody></table></div>
 </div>
 <div class="footer">
@@ -386,7 +401,6 @@ export default function Reportes() {
       const totalCosto = parts.reduce((s, p) => s + Number(p.costo || 0), 0)
       const capsUnicas = new Set(parts.map(p => p.capacitacion_id)).size
 
-      // ── HOJA 1: RESUMEN ───────────────────────────────────────
       const porGerencia = {}
       parts.forEach(p => {
         const g = p._gerencia || 'Sin gerencia'
@@ -396,6 +410,7 @@ export default function Reportes() {
         porGerencia[g].costo += Number(p.costo || 0)
       })
 
+      // Hoja 1: Resumen
       const ws1Data = []
       ws1Data.push([titleCell('ControlCap — Informe de Capacitación'), celda(''), celda(''), celda('')])
       ws1Data.push([subtitleCell(`Universidad Corporativa · CoopeAnde N.º 1 · ${filtroDesc}`), celda(''), celda(''), celda('')])
@@ -405,7 +420,6 @@ export default function Reportes() {
       ws1Data.push([kpiValueCell(capsUnicas, XL.PURPLE), kpiValueCell(totalPartic.toLocaleString(), XL.BLUE), kpiValueCell(`${totalHoras.toLocaleString()}h`, { rgb: 'D97706' }), kpiValueCell(`₡${Math.round(totalCosto).toLocaleString()}`, XL.RED)])
       ws1Data.push([celda(''), celda(''), celda(''), celda('')])
       ws1Data.push([headerCell('GERENCIA'), headerCell('PARTICIPACIONES'), headerCell('HORAS TOTALES'), headerCell('COSTO EJECUTADO (₡)')])
-
       Object.entries(porGerencia).sort((a,b)=>b[1].partic-a[1].partic).forEach(([g, d], i) => {
         const bg = i % 2 === 0 ? XL.WHITE : { rgb: 'F5EEFF' }
         ws1Data.push([
@@ -415,37 +429,30 @@ export default function Reportes() {
           accentCell(`₡${Math.round(d.costo).toLocaleString()}`, XL.RED),
         ])
       })
-
       ws1Data.push([
         dataCell('TOTAL', { bold: true, color: XL.WHITE, bg: XL.NAVY }),
         dataCell(totalPartic.toLocaleString(), { bold: true, color: XL.WHITE, bg: XL.NAVY, align: 'center' }),
         dataCell(`${totalHoras.toLocaleString()}h`, { bold: true, color: XL.WHITE, bg: XL.NAVY, align: 'center' }),
         dataCell(`₡${Math.round(totalCosto).toLocaleString()}`, { bold: true, color: XL.YELLOW, bg: XL.NAVY, align: 'right' }),
       ])
-
       const ws1 = XLSXStyle.utils.aoa_to_sheet(ws1Data)
       ws1['!cols'] = [{ wch: 45 }, { wch: 18 }, { wch: 18 }, { wch: 22 }]
-      ws1['!rows'] = [{ hpt: 28 }, { hpt: 16 }, { hpt: 14 }, { hpt: 10 }, { hpt: 22 }, { hpt: 36 }]
-      ws1['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } },
-        { s: { r: 1, c: 0 }, e: { r: 1, c: 3 } },
-        { s: { r: 2, c: 0 }, e: { r: 2, c: 3 } },
-      ]
+      ws1['!merges'] = [{ s:{r:0,c:0}, e:{r:0,c:3} }, { s:{r:1,c:0}, e:{r:1,c:3} }, { s:{r:2,c:0}, e:{r:2,c:3} }]
       XLSXStyle.utils.book_append_sheet(wb, ws1, '📊 Resumen')
 
-      // ── HOJA 2: PARTICIPANTES ─────────────────────────────────
+      // Hoja 2: Participantes
       const ws2Data = []
-      ws2Data.push([titleCell('Detalle de Participantes'), ...Array(11).fill(celda(''))])
-      ws2Data.push([subtitleCell(filtroDesc), ...Array(11).fill(celda(''))])
-      ws2Data.push(Array(12).fill(celda('')))
+      ws2Data.push([titleCell('Detalle de Participantes'), ...Array(12).fill(celda(''))])
+      ws2Data.push([subtitleCell(filtroDesc), ...Array(12).fill(celda(''))])
+      ws2Data.push(Array(13).fill(celda('')))
       ws2Data.push([
         headerCell('COLABORADOR'), headerCell('CORREO'), headerCell('GÉNERO'),
         headerCell('GERENCIA'), headerCell('DEPARTAMENTO'), headerCell('PUESTO'),
-        headerCell('CAPACITACIÓN'), headerCell('PROVEEDOR', XL.PURPLE),
-        headerCell('CATEGORÍA', XL.PURPLE), headerCell('FACILITADOR', XL.PURPLE),
-        headerCell('HORAS', XL.BLUE), headerCell('COSTO (₡)', XL.RED),
+        headerCell('CAPACITACIÓN'), headerCell('FECHA', XL.BLUE),
+        headerCell('PROVEEDOR', XL.PURPLE), headerCell('CATEGORÍA', XL.PURPLE),
+        headerCell('FACILITADOR', XL.PURPLE), headerCell('HORAS', XL.BLUE),
+        headerCell('COSTO (₡)', XL.RED),
       ])
-
       parts.forEach((p, i) => {
         const bg = i % 2 === 0 ? XL.WHITE : XL.LIGHT
         ws2Data.push([
@@ -456,6 +463,7 @@ export default function Reportes() {
           dataCell(p._departamento, { bg }),
           dataCell(p._puesto, { bg }),
           dataCell(p._cap?.nombre || '—', { bg }),
+          dataCell(p._fecha, { align: 'center', bg }),
           dataCell(p._cap?.proveedor || '—', { bg }),
           dataCell(p._cap?.categoria || '—', { bg }),
           dataCell(p._cap?.facilitador || '—', { bg }),
@@ -463,60 +471,52 @@ export default function Reportes() {
           accentCell(`₡${Math.round(p.costo || 0).toLocaleString()}`, XL.RED),
         ])
       })
-
       const ws2 = XLSXStyle.utils.aoa_to_sheet(ws2Data)
-      ws2['!cols'] = [{ wch: 30 }, { wch: 28 }, { wch: 8 }, { wch: 25 }, { wch: 22 }, { wch: 25 }, { wch: 35 }, { wch: 25 }, { wch: 25 }, { wch: 20 }, { wch: 8 }, { wch: 16 }]
-      ws2['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 11 } },
-        { s: { r: 1, c: 0 }, e: { r: 1, c: 11 } },
-      ]
+      ws2['!cols'] = [{ wch: 28 }, { wch: 26 }, { wch: 7 }, { wch: 22 }, { wch: 20 }, { wch: 22 }, { wch: 32 }, { wch: 12 }, { wch: 22 }, { wch: 22 }, { wch: 18 }, { wch: 7 }, { wch: 15 }]
+      ws2['!merges'] = [{ s:{r:0,c:0}, e:{r:0,c:12} }, { s:{r:1,c:0}, e:{r:1,c:12} }]
       XLSXStyle.utils.book_append_sheet(wb, ws2, '👥 Participantes')
 
-      // ── HOJA 3: CAPACITACIONES ────────────────────────────────
+      // Hoja 3: Capacitaciones
       const capsUnicasArr = [...new Map(parts.map(p => [p.capacitacion_id, p._cap])).values()].filter(Boolean)
       const ws3Data = []
       ws3Data.push([titleCell('Capacitaciones'), ...Array(9).fill(celda(''))])
       ws3Data.push([subtitleCell(filtroDesc), ...Array(9).fill(celda(''))])
       ws3Data.push(Array(10).fill(celda('')))
       ws3Data.push([
-        headerCell('NOMBRE'), headerCell('PROVEEDOR', XL.PURPLE),
-        headerCell('CATEGORÍA', XL.PURPLE), headerCell('MODALIDAD'),
-        headerCell('ESTADO'), headerCell('FACILITADOR'),
-        headerCell('FECHA INICIO'), headerCell('HORAS', XL.BLUE),
+        headerCell('NOMBRE'), headerCell('FECHA', XL.BLUE),
+        headerCell('PROVEEDOR', XL.PURPLE), headerCell('CATEGORÍA', XL.PURPLE),
+        headerCell('MODALIDAD'), headerCell('ESTADO'),
+        headerCell('FACILITADOR'), headerCell('HORAS', XL.BLUE),
         headerCell('PARTICIPANTES', XL.BLUE), headerCell('COSTO TOTAL (₡)', XL.RED),
       ])
-
       capsUnicasArr.forEach((c, i) => {
         const bg = i % 2 === 0 ? XL.WHITE : XL.LIGHT
         const ps = parts.filter(p => p.capacitacion_id === c.id)
         const ct = ps.reduce((s, p) => s + Number(p.costo || 0), 0)
         ws3Data.push([
           dataCell(c.nombre, { bold: true, bg }),
+          dataCell(c.fecha_inicio || '—', { align: 'center', bg }),
           dataCell(c.proveedor || '—', { bg }),
           dataCell(c.categoria || '—', { color: XL.PURPLE, bg }),
           dataCell(c.modalidad || '—', { bg }),
           dataCell(c.estado || '—', { bg }),
           dataCell(c.facilitador || '—', { bg }),
-          dataCell(c.fecha_inicio || '—', { align: 'center', bg }),
           dataCell(`${c.horas || 0}h`, { align: 'center', color: XL.BLUE, bold: true, bg }),
           dataCell(ps.length.toString(), { align: 'center', color: XL.BLUE, bold: true, bg }),
           accentCell(`₡${Math.round(ct).toLocaleString()}`, XL.RED),
         ])
       })
-
       const ws3 = XLSXStyle.utils.aoa_to_sheet(ws3Data)
-      ws3['!cols'] = [{ wch: 40 }, { wch: 25 }, { wch: 25 }, { wch: 12 }, { wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 14 }, { wch: 18 }]
-      ws3['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 9 } },
-        { s: { r: 1, c: 0 }, e: { r: 1, c: 9 } },
-      ]
+      ws3['!cols'] = [{ wch: 38 }, { wch: 12 }, { wch: 22 }, { wch: 22 }, { wch: 12 }, { wch: 12 }, { wch: 18 }, { wch: 7 }, { wch: 13 }, { wch: 18 }]
+      ws3['!merges'] = [{ s:{r:0,c:0}, e:{r:0,c:9} }, { s:{r:1,c:0}, e:{r:1,c:9} }]
       XLSXStyle.utils.book_append_sheet(wb, ws3, '🎓 Capacitaciones')
 
-      const filtroFile = [filtroAnio||'Todos', filtroGerencia?filtroGerencia.slice(0,10):'', filtroProveedor?filtroProveedor.slice(0,10):'', colabSeleccionado?colabSeleccionado.nombre.split(' ').slice(0,2).join('_'):''].filter(Boolean).join('_')
+      const filtroFile = capsSeleccionadas.length > 0
+        ? `Caps_${capsSeleccionadas.length}`
+        : [filtroAnio||'Todos', filtroGerencia?filtroGerencia.slice(0,10):'', filtroProveedor?filtroProveedor.slice(0,10):'', colabSeleccionado?colabSeleccionado.nombre.split(' ').slice(0,2).join('_'):''].filter(Boolean).join('_')
+
       XLSXStyle.writeFile(wb, `ControlCap_${filtroFile}_${new Date().toISOString().slice(0,10)}.xlsx`)
-    } catch(e) {
-      alert('Error generando Excel: ' + e.message)
-    }
+    } catch(e) { alert('Error generando Excel: ' + e.message) }
     setGenerando('')
   }
 
@@ -596,21 +596,27 @@ export default function Reportes() {
         s4.addText(colabSeleccionado.puesto||'—', { x:5.5, y:1.65, w:5, h:0.35, fontSize:13, color:GRAY, fontFace:'Arial' })
         const capCount = {}
         parts.forEach(p => {
-          if (!capCount[p.capacitacion_id]) capCount[p.capacitacion_id] = { nombre:p._cap?.nombre||'—', horas:0, costo:0 }
+          if (!capCount[p.capacitacion_id]) capCount[p.capacitacion_id] = { nombre:p._cap?.nombre||'—', fecha:p._fecha, horas:0, costo:0 }
           capCount[p.capacitacion_id].horas += Number(p.horas||0)
           capCount[p.capacitacion_id].costo += Number(p.costo||0)
         })
         const capsList = Object.values(capCount).slice(0,10)
         if (capsList.length > 0) {
           const rows = [
-            [{ text:'Capacitación', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10} },{ text:'Horas', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },{ text:'Costo', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'right'} }],
+            [
+              { text:'Capacitación', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10} },
+              { text:'Fecha', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },
+              { text:'Horas', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },
+              { text:'Costo', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'right'} },
+            ],
             ...capsList.map((c,i)=>[
-              { text:c.nombre.length>60?c.nombre.slice(0,58)+'...':c.nombre, options:{fontSize:10,fill:i%2===0?WHITE:LIGHT} },
+              { text:c.nombre.length>50?c.nombre.slice(0,48)+'...':c.nombre, options:{fontSize:10,fill:i%2===0?WHITE:LIGHT} },
+              { text:c.fecha||'—', options:{fontSize:10,align:'center',fill:i%2===0?WHITE:LIGHT} },
               { text:c.horas+'h', options:{fontSize:10,align:'center',fill:i%2===0?WHITE:LIGHT} },
               { text:'₡'+Math.round(c.costo).toLocaleString(), options:{fontSize:10,align:'right',fill:i%2===0?WHITE:LIGHT} },
             ])
           ]
-          s4.addTable(rows, { x:0.5, y:2.7, w:12.3, colW:[9.5,1.3,1.5], border:{type:'solid',pt:0.5,color:'E2E8F0'} })
+          s4.addTable(rows, { x:0.5, y:2.7, w:12.3, colW:[7.5,2.0,1.3,1.5], border:{type:'solid',pt:0.5,color:'E2E8F0'} })
         }
       }
 
@@ -619,7 +625,7 @@ export default function Reportes() {
       s5.addText('Top Capacitaciones', { x:0.5, y:0.3, w:12, h:0.55, fontSize:22, bold:true, color:NAVY, fontFace:'Arial' })
       const capCount2 = {}
       parts.forEach(p => {
-        if (!capCount2[p.capacitacion_id]) capCount2[p.capacitacion_id] = { nombre:p._cap?.nombre||'—', proveedor:p._cap?.proveedor||'—', partic:0, horas:0, costo:0 }
+        if (!capCount2[p.capacitacion_id]) capCount2[p.capacitacion_id] = { nombre:p._cap?.nombre||'—', proveedor:p._cap?.proveedor||'—', fecha:p._fecha, partic:0, horas:0, costo:0 }
         capCount2[p.capacitacion_id].partic++
         capCount2[p.capacitacion_id].horas += Number(p.horas||0)
         capCount2[p.capacitacion_id].costo += Number(p.costo||0)
@@ -629,20 +635,22 @@ export default function Reportes() {
         const rows2 = [
           [
             { text:'Capacitación', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10} },
+            { text:'Fecha', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },
             { text:'Proveedor', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10} },
             { text:'Part.', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },
             { text:'Horas', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },
             { text:'Costo total', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'right'} },
           ],
           ...topCaps.map((c,i)=>[
-            { text:c.nombre.length>45?c.nombre.slice(0,43)+'...':c.nombre, options:{fontSize:10,fill:i%2===0?WHITE:LIGHT} },
-            { text:c.proveedor.length>20?c.proveedor.slice(0,18)+'...':c.proveedor, options:{fontSize:9,fill:i%2===0?WHITE:LIGHT} },
+            { text:c.nombre.length>35?c.nombre.slice(0,33)+'...':c.nombre, options:{fontSize:10,fill:i%2===0?WHITE:LIGHT} },
+            { text:c.fecha||'—', options:{fontSize:9,align:'center',fill:i%2===0?WHITE:LIGHT} },
+            { text:c.proveedor.length>18?c.proveedor.slice(0,16)+'...':c.proveedor, options:{fontSize:9,fill:i%2===0?WHITE:LIGHT} },
             { text:c.partic.toString(), options:{fontSize:10,align:'center',fill:i%2===0?WHITE:LIGHT} },
             { text:c.horas+'h', options:{fontSize:10,align:'center',fill:i%2===0?WHITE:LIGHT} },
             { text:'₡'+Math.round(c.costo).toLocaleString(), options:{fontSize:10,align:'right',fill:i%2===0?WHITE:LIGHT} },
           ])
         ]
-        s5.addTable(rows2, { x:0.5, y:1.0, w:12.3, colW:[5.8,2.5,1.0,1.0,2.0], border:{type:'solid',pt:0.5,color:'E2E8F0'} })
+        s5.addTable(rows2, { x:0.5, y:1.0, w:12.3, colW:[4.5,1.3,2.2,0.9,0.9,2.5], border:{type:'solid',pt:0.5,color:'E2E8F0'} })
       }
 
       const s6 = pptx.addSlide()
@@ -655,30 +663,34 @@ export default function Reportes() {
       s6.addText('Informe generado el '+new Date().toLocaleDateString('es-CR'), { x:2, y:3.6, w:9.33, h:0.4, fontSize:12, color:WHITE, fontFace:'Arial', align:'center' })
       s6.addText('Uso interno exclusivo', { x:2, y:4.1, w:9.33, h:0.35, fontSize:11, color:'8899BB', fontFace:'Arial', align:'center' })
 
-      const filtroFile = [filtroAnio||'Todos', filtroGerencia?filtroGerencia.slice(0,10):'', filtroProveedor?filtroProveedor.slice(0,10):'', colabSeleccionado?colabSeleccionado.nombre.split(' ').slice(0,2).join('_'):''].filter(Boolean).join('_')
+      const filtroFile = capsSeleccionadas.length > 0
+        ? `Caps_${capsSeleccionadas.length}`
+        : [filtroAnio||'Todos', filtroGerencia?filtroGerencia.slice(0,10):'', filtroProveedor?filtroProveedor.slice(0,10):'', colabSeleccionado?colabSeleccionado.nombre.split(' ').slice(0,2).join('_'):''].filter(Boolean).join('_')
+
       await pptx.writeFile({ fileName: `ControlCap_${filtroFile}_${new Date().toISOString().slice(0,10)}.pptx` })
     } catch(e) { alert('Error generando PowerPoint: ' + e.message) }
     setGenerando('')
   }
 
   const inp = { height:'36px', border:'1px solid #E2E8F0', borderRadius:'8px', padding:'0 10px', fontSize:'13px', outline:'none', background:'white' }
-  const capsDelAnio = capacitaciones.filter(c => !filtroAnio || (c.fecha_inicio && c.fecha_inicio.startsWith(filtroAnio)))
-  const capsDelProvAnio = filtroProveedor ? capsDelAnio.filter(c => c.proveedor === filtroProveedor) : capsDelAnio
 
   return (
     <div>
+      {/* Filtros */}
       <div style={{ background:'white', borderRadius:'12px', padding:'20px', marginBottom:'20px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)' }}>
         <div style={{ fontSize:'13px', fontWeight:'600', color:'#1E293B', marginBottom:'14px' }}>🔍 Filtros del reporte</div>
         <div style={{ display:'flex', gap:'12px', flexWrap:'wrap', alignItems:'flex-start' }}>
 
+          {/* Año */}
           <div style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
             <label style={{ fontSize:'10px', color:'#94A3B8', fontWeight:'600', textTransform:'uppercase' }}>Año</label>
-            <select value={filtroAnio} onChange={e => { setFiltroAnio(e.target.value); setFiltroCap('') }} style={{ ...inp, width:'120px' }}>
+            <select value={filtroAnio} onChange={e => { setFiltroAnio(e.target.value); setCapsSeleccionadas([]) }} style={{ ...inp, width:'120px' }}>
               <option value="">Todos los años</option>
               {ANIOS.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
           </div>
 
+          {/* Gerencia */}
           <div style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
             <label style={{ fontSize:'10px', color:'#94A3B8', fontWeight:'600', textTransform:'uppercase' }}>Gerencia</label>
             <select value={filtroGerencia} onChange={e => setFiltroGerencia(e.target.value)} style={{ ...inp, width:'220px' }}>
@@ -697,22 +709,74 @@ export default function Reportes() {
             </div>
           )}
 
+          {/* Proveedor */}
           <div style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
             <label style={{ fontSize:'10px', color:'#94A3B8', fontWeight:'600', textTransform:'uppercase' }}>Proveedor</label>
-            <select value={filtroProveedor} onChange={e => { setFiltroProveedor(e.target.value); setFiltroCap('') }} style={{ ...inp, width:'220px' }}>
+            <select value={filtroProveedor} onChange={e => { setFiltroProveedor(e.target.value); setCapsSeleccionadas([]) }} style={{ ...inp, width:'200px' }}>
               <option value="">Todos</option>
               {proveedores.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </div>
 
-          <div style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
-            <label style={{ fontSize:'10px', color:'#94A3B8', fontWeight:'600', textTransform:'uppercase' }}>Capacitación</label>
-            <select value={filtroCap} onChange={e => setFiltroCap(e.target.value)} style={{ ...inp, width:'250px' }}>
-              <option value="">Todas</option>
-              {capsDelProvAnio.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-            </select>
+          {/* Selector de capacitaciones múltiple */}
+          <div style={{ display:'flex', flexDirection:'column', gap:'4px' }} ref={selectorRef}>
+            <label style={{ fontSize:'10px', color:'#94A3B8', fontWeight:'600', textTransform:'uppercase' }}>
+              Capacitaciones {capsSeleccionadas.length > 0 && <span style={{ background:'#8131B0', color:'white', borderRadius:'10px', padding:'1px 7px', fontSize:'10px', marginLeft:'4px' }}>{capsSeleccionadas.length}</span>}
+            </label>
+            <div style={{ position:'relative' }}>
+              <button onClick={() => setMostrarSelectorCaps(!mostrarSelectorCaps)}
+                style={{ ...inp, width:'260px', textAlign:'left', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <span style={{ color: capsSeleccionadas.length > 0 ? '#1E293B' : '#94A3B8', fontSize:'13px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:'210px' }}>
+                  {capsSeleccionadas.length > 0 ? `${capsSeleccionadas.length} seleccionada(s)` : 'Todas las capacitaciones'}
+                </span>
+                <span style={{ fontSize:'10px', color:'#94A3B8' }}>{mostrarSelectorCaps ? '▲' : '▼'}</span>
+              </button>
+              {mostrarSelectorCaps && (
+                <div style={{ position:'absolute', top:'40px', left:0, width:'360px', background:'white', border:'1px solid #E2E8F0', borderRadius:'10px', boxShadow:'0 8px 24px rgba(0,0,0,0.12)', zIndex:100, maxHeight:'360px', display:'flex', flexDirection:'column' }}>
+                  <div style={{ padding:'10px 12px', borderBottom:'1px solid #E2E8F0' }}>
+                    <input type="text" placeholder="🔍 Buscar capacitación..." value={busquedaCaps}
+                      onChange={e => setBusquedaCaps(e.target.value)}
+                      style={{ ...inp, width:'100%', fontSize:'12px' }} />
+                  </div>
+                  {capsSeleccionadas.length > 0 && (
+                    <div style={{ padding:'6px 12px', borderBottom:'1px solid #E2E8F0', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                      <span style={{ fontSize:'11px', color:'#8131B0', fontWeight:'600' }}>{capsSeleccionadas.length} seleccionada(s)</span>
+                      <button onClick={limpiarCaps} style={{ background:'none', border:'none', cursor:'pointer', fontSize:'11px', color:'#DA2B1F' }}>✕ Limpiar</button>
+                    </div>
+                  )}
+                  <div style={{ overflowY:'auto', flex:1 }}>
+                    {capsParaSelector.length === 0 ? (
+                      <div style={{ padding:'20px', textAlign:'center', color:'#94A3B8', fontSize:'12px' }}>No hay capacitaciones</div>
+                    ) : capsParaSelector.map((c, i) => {
+                      const seleccionada = capsSeleccionadas.find(s => s.id === c.id)
+                      return (
+                        <div key={c.id} onClick={() => toggleCap(c)}
+                          style={{ padding:'8px 12px', cursor:'pointer', display:'flex', alignItems:'center', gap:'10px', borderBottom:i<capsParaSelector.length-1?'1px solid #F8FAFC':'none', background: seleccionada ? '#F5EEFF' : 'white' }}
+                          onMouseEnter={e => { if (!seleccionada) e.currentTarget.style.background='#F8FAFC' }}
+                          onMouseLeave={e => { if (!seleccionada) e.currentTarget.style.background='white' }}>
+                          <div style={{ width:'16px', height:'16px', borderRadius:'4px', border:`2px solid ${seleccionada ? '#8131B0' : '#CBD5E1'}`, background: seleccionada ? '#8131B0' : 'white', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                            {seleccionada && <span style={{ color:'white', fontSize:'10px', lineHeight:1 }}>✓</span>}
+                          </div>
+                          <div style={{ flex:1, overflow:'hidden' }}>
+                            <div style={{ fontSize:'12px', color: seleccionada ? '#8131B0' : '#1E293B', fontWeight: seleccionada ? '600' : '400', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.nombre}</div>
+                            <div style={{ fontSize:'10px', color:'#94A3B8' }}>{c.fecha_inicio?.slice(0,7) || '—'} · {c.proveedor || '—'}</div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div style={{ padding:'10px 12px', borderTop:'1px solid #E2E8F0', display:'flex', justifyContent:'flex-end' }}>
+                    <button onClick={() => setMostrarSelectorCaps(false)}
+                      style={{ background:'#8131B0', color:'white', border:'none', padding:'6px 16px', borderRadius:'6px', cursor:'pointer', fontSize:'12px' }}>
+                      Aplicar {capsSeleccionadas.length > 0 ? `(${capsSeleccionadas.length})` : ''}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
+          {/* Colaborador */}
           <div style={{ display:'flex', flexDirection:'column', gap:'4px', position:'relative' }}>
             <label style={{ fontSize:'10px', color:'#94A3B8', fontWeight:'600', textTransform:'uppercase' }}>Colaborador</label>
             <div style={{ position:'relative' }}>
@@ -723,13 +787,16 @@ export default function Reportes() {
                 <button onClick={limpiarColab} style={{ position:'absolute', right:'8px', top:'50%', transform:'translateY(-50%)', background:'none', border:'none', cursor:'pointer', color:'#94A3B8', fontSize:'14px' }}>✕</button>
               )}
               {resultadosColab.length > 0 && (
-                <div style={{ position:'absolute', top:'40px', left:0, width:'280px', background:'white', border:'1px solid #E2E8F0', borderRadius:'8px', boxShadow:'0 4px 12px rgba(0,0,0,0.1)', zIndex:50, maxHeight:'200px', overflowY:'auto' }}>
+                <div style={{ position:'absolute', top:'40px', left:0, width:'300px', background:'white', border:'1px solid #E2E8F0', borderRadius:'8px', boxShadow:'0 4px 12px rgba(0,0,0,0.1)', zIndex:50, maxHeight:'240px', overflowY:'auto' }}>
                   {resultadosColab.map((c,i) => (
-                    <div key={c.id} onClick={() => seleccionarColab(c)}
+                    <div key={c.id || c.correo} onClick={() => seleccionarColab(c)}
                       style={{ padding:'8px 12px', cursor:'pointer', fontSize:'12px', borderBottom:i<resultadosColab.length-1?'1px solid #F1F5F9':'none' }}
                       onMouseEnter={e => e.currentTarget.style.background='#F8FAFC'}
                       onMouseLeave={e => e.currentTarget.style.background='white'}>
-                      <div style={{ fontWeight:'500', color:'#1E293B' }}>{c.nombre}</div>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                        <div style={{ fontWeight:'500', color:'#1E293B' }}>{c.nombre}</div>
+                        {c.tipo === 'historico' && <span style={{ fontSize:'9px', background:'#EEF0FF', color:'#8131B0', padding:'1px 5px', borderRadius:'4px' }}>histórico</span>}
+                      </div>
                       <div style={{ color:'#94A3B8', fontSize:'11px' }}>{c.correo} · {c.gerencia}</div>
                     </div>
                   ))}
@@ -738,18 +805,32 @@ export default function Reportes() {
             </div>
           </div>
 
-          {(filtroAnio || filtroGerencia || filtroDep || filtroCap || filtroColab || filtroProveedor) && (
+          {/* Limpiar */}
+          {(filtroAnio || filtroGerencia || filtroDep || capsSeleccionadas.length > 0 || filtroColab || filtroProveedor) && (
             <div style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
               <label style={{ fontSize:'10px', color:'transparent' }}>-</label>
-              <button onClick={() => { setFiltroAnio('2026'); setFiltroGerencia(''); setFiltroDep(''); setFiltroCap(''); setFiltroProveedor(''); limpiarColab() }}
+              <button onClick={() => { setFiltroAnio('2026'); setFiltroGerencia(''); setFiltroDep(''); setFiltroProveedor(''); setCapsSeleccionadas([]); limpiarColab() }}
                 style={{ ...inp, width:'auto', padding:'0 14px', cursor:'pointer', color:'#64748B' }}>
                 ✕ Limpiar todo
               </button>
             </div>
           )}
         </div>
+
+        {/* Chips de capacitaciones seleccionadas */}
+        {capsSeleccionadas.length > 0 && (
+          <div style={{ marginTop:'12px', display:'flex', flexWrap:'wrap', gap:'6px' }}>
+            {capsSeleccionadas.map(c => (
+              <div key={c.id} style={{ background:'#EEF0FF', color:'#8131B0', padding:'4px 10px', borderRadius:'20px', fontSize:'11px', display:'flex', alignItems:'center', gap:'6px' }}>
+                <span style={{ maxWidth:'200px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.nombre}</span>
+                <button onClick={() => toggleCap(c)} style={{ background:'none', border:'none', cursor:'pointer', color:'#8131B0', fontSize:'12px', padding:0, lineHeight:1 }}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
+      {/* Preview KPIs */}
       {preview && (
         <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'12px', marginBottom:'20px' }}>
           {[
@@ -766,11 +847,12 @@ export default function Reportes() {
         </div>
       )}
 
+      {/* Botones reporte */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:'16px' }}>
         {[
-          { id:'pdf', icon:'📄', titulo:'PDF Ejecutivo', desc:'Informe completo con KPIs, resumen por gerencia, capacitaciones y detalle de participantes.', color:COLORS.rojo, accion:generarPDF, boton:'Generar PDF' },
-          { id:'excel', icon:'📊', titulo:'Excel Estilizado', desc:'3 hojas con diseño CoopeAnde: Resumen con KPIs, Participantes y Capacitaciones.', color:'#0F9B72', accion:generarExcel, boton:'Descargar Excel' },
-          { id:'pptx', icon:'📽️', titulo:'PowerPoint Ejecutivo', desc:'Presentación con portada, KPIs, gráficas por gerencia y top capacitaciones.', color:COLORS.morado, accion:generarPPTX, boton:'Descargar PPTX' },
+          { id:'pdf', icon:'📄', titulo:'PDF Ejecutivo', desc:'Informe completo con KPIs, resumen por gerencia, capacitaciones con fecha y detalle de participantes.', color:COLORS.rojo, accion:generarPDF, boton:'Generar PDF' },
+          { id:'excel', icon:'📊', titulo:'Excel Estilizado', desc:'3 hojas con diseño CoopeAnde: Resumen con KPIs, Participantes y Capacitaciones con fechas.', color:'#0F9B72', accion:generarExcel, boton:'Descargar Excel' },
+          { id:'pptx', icon:'📽️', titulo:'PowerPoint Ejecutivo', desc:'Presentación con portada, KPIs, gráficas por gerencia y top capacitaciones con fechas.', color:COLORS.morado, accion:generarPPTX, boton:'Descargar PPTX' },
         ].map(r => (
           <div key={r.id} style={{ background:'white', borderRadius:'16px', padding:'24px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', border:`1px solid ${r.color}22` }}>
             <div style={{ fontSize:'32px', marginBottom:'10px' }}>{r.icon}</div>
