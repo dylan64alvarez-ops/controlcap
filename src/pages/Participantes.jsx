@@ -27,7 +27,6 @@ export default function Participantes({ onCambio }) {
   const [resultadosMasivos, setResultadosMasivos] = useState([])
   const [capSeleccionada, setCapSeleccionada] = useState('')
   const [busquedaCap, setBusquedaCap] = useState('')
-  const [capSeleccionadaNombre, setCapSeleccionadaNombre] = useState('')
   const [resultadosCap, setResultadosCap] = useState([])
   const [guardando, setGuardando] = useState(false)
   const [exito, setExito] = useState('')
@@ -86,6 +85,7 @@ export default function Participantes({ onCambio }) {
     const desde = pag * POR_PAGINA
     const hasta = desde + POR_PAGINA - 1
 
+    // Calcular capIds
     let capIds = null
     if (anio || prov) {
       let capsFiltered = capsU
@@ -95,6 +95,7 @@ export default function Participantes({ onCambio }) {
       if (capsFiltered.length > 0) capIds = capsFiltered.map(c => c.id)
     }
 
+    // Búsqueda en servidor
     let correosEncontrados = null
     if (busq && busq.trim().length > 0) {
       const t = busq.toLowerCase().trim()
@@ -122,21 +123,65 @@ export default function Participantes({ onCambio }) {
       if (correosEncontrados.length === 0) { setParticipantes([]); setTotalCount(0); return }
     }
 
-    let q = supabase.from('participantes').select('*', { count: 'exact' })
-      .order('created_at', { ascending: false }).range(desde, hasta)
+    // Si hay muchos capIds, dividir en lotes y paginar manualmente
+    let dataFinal = [], countFinal = 0
 
-    if (capIds) q = q.in('capacitacion_id', capIds)
-    if (cap) q = q.eq('capacitacion_id', cap)
-    if (correosEncontrados) q = q.in('correo', correosEncontrados)
+    if (capIds && capIds.length > 400) {
+      // Recolectar todos los registros en lotes
+      let todosLosRegistros = []
+      for (let i = 0; i < capIds.length; i += 400) {
+        const lote = capIds.slice(i, i + 400)
+        let qLote = supabase
+          .from('participantes')
+          .select('*')
+          .in('capacitacion_id', lote)
+          .order('created_at', { ascending: false })
+        if (cap) qLote = qLote.eq('capacitacion_id', cap)
+        if (correosEncontrados) qLote = qLote.in('correo', correosEncontrados)
 
-    const { data, count } = await q
+        // Paginar dentro de cada lote
+        let desdeLote = 0
+        while (true) {
+          const { data: pagLote } = await qLote.range(desdeLote, desdeLote + 999)
+          if (!pagLote || pagLote.length === 0) break
+          todosLosRegistros.push(...pagLote)
+          if (pagLote.length < 1000) break
+          desdeLote += 1000
+        }
+      }
 
-    const enriquecidos = (data || []).map(p => {
+      // Ordenar y paginar manualmente
+      todosLosRegistros.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      countFinal = todosLosRegistros.length
+      dataFinal = todosLosRegistros.slice(desde, hasta + 1)
+
+    } else {
+      // Query normal con paginación de Supabase
+      let q = supabase
+        .from('participantes')
+        .select('*', { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(desde, hasta)
+
+      if (capIds) q = q.in('capacitacion_id', capIds)
+      if (cap) q = q.eq('capacitacion_id', cap)
+      if (correosEncontrados) q = q.in('correo', correosEncontrados)
+
+      const { data, count } = await q
+      dataFinal = data || []
+      countFinal = count || 0
+    }
+
+    const enriquecidos = dataFinal.map(p => {
       const c = cMapU[p.capacitacion_id] || null
-      const col = cByIdU[p.colaborador_id] ||
-        (p.correo && !p.correo.startsWith('sin-correo__') ? cByCorreoU[p.correo.toLowerCase().trim()] : null) ||
-        (p.nombre_colab ? cByNombreU[p.nombre_colab.toUpperCase().trim()] : null) || null
-      const correoResuelto = col?.correo || (p.correo && !p.correo.startsWith('sin-correo__') ? p.correo : null) || null
+      const colPorId = cByIdU[p.colaborador_id]
+      const colPorCorreo = p.correo && !p.correo.startsWith('sin-correo__')
+        ? cByCorreoU[p.correo.toLowerCase().trim()] : null
+      const colPorNombre = p.nombre_colab
+        ? cByNombreU[p.nombre_colab.toUpperCase().trim()] : null
+      const col = colPorId || colPorCorreo || colPorNombre || null
+      const correoResuelto = col?.correo ||
+        (p.correo && !p.correo.startsWith('sin-correo__') ? p.correo : null) || null
       return {
         ...p, _cap: c, _col: col,
         _anio: c?.fecha_inicio ? new Date(c.fecha_inicio).getFullYear() : null,
@@ -151,7 +196,7 @@ export default function Participantes({ onCambio }) {
 
     if (reset || pag === 0) setParticipantes(enriquecidos)
     else setParticipantes(prev => [...prev, ...enriquecidos])
-    setTotalCount(count || 0)
+    setTotalCount(countFinal)
     setPaginaActual(pag)
   }
 
@@ -165,27 +210,20 @@ export default function Participantes({ onCambio }) {
     return () => clearTimeout(timer)
   }, [busqueda, filtroAnio, filtroCap, filtroProveedor, cargadoInicial])
 
-  // Búsqueda de capacitación en modal
   useEffect(() => {
     if (!busquedaCap || busquedaCap.length < 2) { setResultadosCap([]); return }
     const b = busquedaCap.toLowerCase()
-    setResultadosCap(
-      capacitaciones.filter(c => c.nombre?.toLowerCase().includes(b)).slice(0, 8)
-    )
+    setResultadosCap(capacitaciones.filter(c => c.nombre?.toLowerCase().includes(b)).slice(0, 8))
   }, [busquedaCap, capacitaciones])
 
-  // Búsqueda de colaborador en modal
   useEffect(() => {
     if (!busquedaColab) { setResultados([]); return }
     const b = busquedaColab.toLowerCase()
-    setResultados(
-      colaboradores.filter(c =>
-        c.nombre?.toLowerCase().includes(b) || c.correo?.toLowerCase().includes(b)
-      ).slice(0, 8)
-    )
+    setResultados(colaboradores.filter(c =>
+      c.nombre?.toLowerCase().includes(b) || c.correo?.toLowerCase().includes(b)
+    ).slice(0, 8))
   }, [busquedaColab, colaboradores])
 
-  // Procesar correos masivos
   useEffect(() => {
     if (!correosMasivos.trim()) { setResultadosMasivos([]); return }
     const lineas = correosMasivos.split(/[\n,;]+/).map(l => l.trim().toLowerCase()).filter(l => l.includes('@'))
@@ -198,14 +236,12 @@ export default function Participantes({ onCambio }) {
 
   function seleccionarCap(cap) {
     setCapSeleccionada(cap.id)
-    setCapSeleccionadaNombre(cap.nombre)
     setBusquedaCap(cap.nombre)
     setResultadosCap([])
   }
 
   function limpiarCap() {
     setCapSeleccionada('')
-    setCapSeleccionadaNombre('')
     setBusquedaCap('')
     setResultadosCap([])
   }
@@ -218,6 +254,13 @@ export default function Participantes({ onCambio }) {
     setResultadosMasivos([])
     limpiarCap()
     setModoMasivo(false)
+  }
+
+  async function cargarMas() {
+    const nueva = paginaActual + 1
+    setCargando(true)
+    await buscarConFiltros(nueva, filtroAnio, filtroCap, filtroProveedor, busqueda, null, null, null, null, null, false)
+    setCargando(false)
   }
 
   async function agregar(colaborador) {
@@ -279,13 +322,6 @@ export default function Participantes({ onCambio }) {
     setCargando(false)
     if (onCambio) onCambio()
     setTimeout(() => setExito(''), 5000)
-  }
-
-  async function cargarMas() {
-    const nueva = paginaActual + 1
-    setCargando(true)
-    await buscarConFiltros(nueva, filtroAnio, filtroCap, filtroProveedor, busqueda, null, null, null, null, null, false)
-    setCargando(false)
   }
 
   const capsFiltradasSelector = capacitaciones
@@ -389,7 +425,6 @@ export default function Participantes({ onCambio }) {
         )}
       </div>
 
-      {/* Modal */}
       {modal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: 'white', borderRadius: '16px', width: '560px', maxWidth: '95vw', maxHeight: '90vh', overflow: 'auto' }}>
@@ -400,20 +435,13 @@ export default function Participantes({ onCambio }) {
 
             <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
-              {/* Búsqueda de capacitación */}
+              {/* Búsqueda capacitación */}
               <div>
-                <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }}>
-                  Capacitación *
-                </label>
+                <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }}>Capacitación *</label>
                 <div style={{ position: 'relative' }}>
-                  <input
-                    type="text"
-                    placeholder="Buscar capacitación por nombre..."
+                  <input type="text" placeholder="Buscar capacitación por nombre..."
                     value={busquedaCap}
-                    onChange={e => {
-                      setBusquedaCap(e.target.value)
-                      if (capSeleccionada) limpiarCap()
-                    }}
+                    onChange={e => { setBusquedaCap(e.target.value); if (capSeleccionada) limpiarCap() }}
                     style={{ ...inp, width: '100%', paddingRight: capSeleccionada ? '32px' : '10px', borderColor: capSeleccionada ? '#0F9B72' : '#E2E8F0' }}
                   />
                   {capSeleccionada && (
@@ -428,18 +456,14 @@ export default function Participantes({ onCambio }) {
                           onMouseEnter={e => e.currentTarget.style.background = '#F8FAFC'}
                           onMouseLeave={e => e.currentTarget.style.background = 'white'}>
                           <div style={{ fontWeight: '500', color: '#1E293B' }}>{c.nombre}</div>
-                          <div style={{ fontSize: '11px', color: '#94A3B8' }}>
-                            {c.proveedor || '—'} · {c.horas}h · {c.fecha_inicio?.slice(0, 4) || '—'}
-                          </div>
+                          <div style={{ fontSize: '11px', color: '#94A3B8' }}>{c.proveedor || '—'} · {c.horas}h · {c.fecha_inicio?.slice(0, 4) || '—'}</div>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
                 {capSeleccionada && (
-                  <div style={{ marginTop: '6px', fontSize: '11px', color: '#0F9B72', fontWeight: '500' }}>
-                    ✓ Capacitación seleccionada
-                  </div>
+                  <div style={{ marginTop: '6px', fontSize: '11px', color: '#0F9B72', fontWeight: '500' }}>✓ Capacitación seleccionada</div>
                 )}
               </div>
 
@@ -493,12 +517,9 @@ export default function Participantes({ onCambio }) {
                     <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', display: 'block', marginBottom: '5px' }}>
                       Pegá los correos (uno por línea, o separados por coma o punto y coma)
                     </label>
-                    <textarea
-                      value={correosMasivos}
-                      onChange={e => setCorreosMasivos(e.target.value)}
+                    <textarea value={correosMasivos} onChange={e => setCorreosMasivos(e.target.value)}
                       placeholder={'usuario1@coopeande1.com\nusuario2@coopeande1.com\nusuario3@coopeande1.com'}
-                      style={{ width: '100%', height: '120px', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px', fontSize: '13px', outline: 'none', resize: 'vertical', fontFamily: 'monospace' }}
-                    />
+                      style={{ width: '100%', height: '120px', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px', fontSize: '13px', outline: 'none', resize: 'vertical', fontFamily: 'monospace' }} />
                   </div>
                   {resultadosMasivos.length > 0 && (
                     <div>
