@@ -43,7 +43,7 @@ export default function Participantes({ onCambio }) {
   async function cargarTodo() {
     setCargando(true)
     const [cRes, colRes] = await Promise.all([
-      supabase.from('capacitaciones').select('id, nombre, horas, fecha_inicio, proveedor').order('nombre'),
+      supabase.from('capacitaciones').select('id, nombre, horas, costo, fecha_inicio, proveedor').order('nombre'),
       supabase.from('colaboradores').select('id, nombre, correo, gerencia, departamento, puesto').order('nombre')
     ])
 
@@ -85,7 +85,6 @@ export default function Participantes({ onCambio }) {
     const desde = pag * POR_PAGINA
     const hasta = desde + POR_PAGINA - 1
 
-    // Calcular capIds
     let capIds = null
     if (anio || prov) {
       let capsFiltered = capsU
@@ -95,7 +94,6 @@ export default function Participantes({ onCambio }) {
       if (capsFiltered.length > 0) capIds = capsFiltered.map(c => c.id)
     }
 
-    // Búsqueda en servidor
     let correosEncontrados = null
     if (busq && busq.trim().length > 0) {
       const t = busq.toLowerCase().trim()
@@ -123,23 +121,15 @@ export default function Participantes({ onCambio }) {
       if (correosEncontrados.length === 0) { setParticipantes([]); setTotalCount(0); return }
     }
 
-    // Si hay muchos capIds, dividir en lotes y paginar manualmente
     let dataFinal = [], countFinal = 0
 
     if (capIds && capIds.length > 400) {
-      // Recolectar todos los registros en lotes
       let todosLosRegistros = []
       for (let i = 0; i < capIds.length; i += 400) {
         const lote = capIds.slice(i, i + 400)
-        let qLote = supabase
-          .from('participantes')
-          .select('*')
-          .in('capacitacion_id', lote)
-          .order('created_at', { ascending: false })
+        let qLote = supabase.from('participantes').select('*').in('capacitacion_id', lote).order('created_at', { ascending: false })
         if (cap) qLote = qLote.eq('capacitacion_id', cap)
         if (correosEncontrados) qLote = qLote.in('correo', correosEncontrados)
-
-        // Paginar dentro de cada lote
         let desdeLote = 0
         while (true) {
           const { data: pagLote } = await qLote.range(desdeLote, desdeLote + 999)
@@ -149,24 +139,15 @@ export default function Participantes({ onCambio }) {
           desdeLote += 1000
         }
       }
-
-      // Ordenar y paginar manualmente
       todosLosRegistros.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
       countFinal = todosLosRegistros.length
       dataFinal = todosLosRegistros.slice(desde, hasta + 1)
-
     } else {
-      // Query normal con paginación de Supabase
-      let q = supabase
-        .from('participantes')
-        .select('*', { count: 'exact' })
-        .order('created_at', { ascending: false })
-        .range(desde, hasta)
-
+      let q = supabase.from('participantes').select('*', { count: 'exact' })
+        .order('created_at', { ascending: false }).range(desde, hasta)
       if (capIds) q = q.in('capacitacion_id', capIds)
       if (cap) q = q.eq('capacitacion_id', cap)
       if (correosEncontrados) q = q.in('correo', correosEncontrados)
-
       const { data, count } = await q
       dataFinal = data || []
       countFinal = count || 0
@@ -175,13 +156,10 @@ export default function Participantes({ onCambio }) {
     const enriquecidos = dataFinal.map(p => {
       const c = cMapU[p.capacitacion_id] || null
       const colPorId = cByIdU[p.colaborador_id]
-      const colPorCorreo = p.correo && !p.correo.startsWith('sin-correo__')
-        ? cByCorreoU[p.correo.toLowerCase().trim()] : null
-      const colPorNombre = p.nombre_colab
-        ? cByNombreU[p.nombre_colab.toUpperCase().trim()] : null
+      const colPorCorreo = p.correo && !p.correo.startsWith('sin-correo__') ? cByCorreoU[p.correo.toLowerCase().trim()] : null
+      const colPorNombre = p.nombre_colab ? cByNombreU[p.nombre_colab.toUpperCase().trim()] : null
       const col = colPorId || colPorCorreo || colPorNombre || null
-      const correoResuelto = col?.correo ||
-        (p.correo && !p.correo.startsWith('sin-correo__') ? p.correo : null) || null
+      const correoResuelto = col?.correo || (p.correo && !p.correo.startsWith('sin-correo__') ? p.correo : null) || null
       return {
         ...p, _cap: c, _col: col,
         _anio: c?.fecha_inicio ? new Date(c.fecha_inicio).getFullYear() : null,
@@ -272,7 +250,8 @@ export default function Participantes({ onCambio }) {
       colaborador_id: colaborador.id,
       correo: colaborador.correo.toLowerCase().trim(),
       horas: cap?.horas || 0,
-      genero: null, costo: 0,
+      costo: cap?.costo || 0,
+      genero: null,
       nombre_colab: colaborador.nombre,
       gerencia_colab: colaborador.gerencia || null,
       departamento_colab: colaborador.departamento || null,
@@ -304,7 +283,8 @@ export default function Participantes({ onCambio }) {
         colaborador_id: item.col.id,
         correo: item.correo,
         horas: cap?.horas || 0,
-        genero: null, costo: 0,
+        costo: cap?.costo || 0,
+        genero: null,
         nombre_colab: item.col.nombre,
         gerencia_colab: item.col.gerencia || null,
         departamento_colab: item.col.departamento || null,
@@ -456,15 +436,24 @@ export default function Participantes({ onCambio }) {
                           onMouseEnter={e => e.currentTarget.style.background = '#F8FAFC'}
                           onMouseLeave={e => e.currentTarget.style.background = 'white'}>
                           <div style={{ fontWeight: '500', color: '#1E293B' }}>{c.nombre}</div>
-                          <div style={{ fontSize: '11px', color: '#94A3B8' }}>{c.proveedor || '—'} · {c.horas}h · {c.fecha_inicio?.slice(0, 4) || '—'}</div>
+                          <div style={{ fontSize: '11px', color: '#94A3B8' }}>
+                            {c.proveedor || '—'} · {c.horas}h · {c.fecha_inicio?.slice(0, 4) || '—'}
+                            {c.costo > 0 && ` · ₡${c.costo.toLocaleString()} por persona`}
+                          </div>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
-                {capSeleccionada && (
-                  <div style={{ marginTop: '6px', fontSize: '11px', color: '#0F9B72', fontWeight: '500' }}>✓ Capacitación seleccionada</div>
-                )}
+                {capSeleccionada && (() => {
+                  const cap = capacitaciones.find(c => c.id === capSeleccionada)
+                  return (
+                    <div style={{ marginTop: '6px', fontSize: '11px', color: '#0F9B72', fontWeight: '500' }}>
+                      ✓ Seleccionada · {cap?.horas || 0}h
+                      {cap?.costo > 0 ? ` · ₡${cap.costo.toLocaleString()} por persona` : ''}
+                    </div>
+                  )
+                })()}
               </div>
 
               {/* Tabs */}
