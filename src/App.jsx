@@ -7,6 +7,7 @@ import Presupuesto from './pages/Presupuesto.jsx'
 import Participantes from './pages/Participantes.jsx'
 import Reportes from './pages/Reportes.jsx'
 import ImportarCapacitaciones from './pages/ImportarCapacitaciones.jsx'
+import Directores from './pages/Directores.jsx'
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -317,6 +318,7 @@ export default function App() {
     { id: 'participantes',           label: '👥 Participantes' },
     { id: 'presupuesto',             label: '💰 Presupuesto' },
     { id: 'colaboradores',           label: '📋 Colaboradores' },
+    { id: 'directores',              label: '👔 Directores' },
     { id: 'reportes',                label: '📄 Reportes' },
     { id: 'importar',                label: '📥 Importar colaboradores' },
     { id: 'importar-capacitaciones', label: '📤 Importar capacitaciones' },
@@ -330,7 +332,7 @@ export default function App() {
   const paginasActivas = [
     'dashboard', 'importar', 'colaboradores', 'capacitaciones',
     'presupuesto', 'participantes', 'reportes',
-    'importar-capacitaciones'
+    'importar-capacitaciones', 'directores'
   ]
 
   const anios = ['todos', '2026', '2025', '2024', '2023', '2022']
@@ -471,6 +473,7 @@ export default function App() {
           {pagina === 'presupuesto'             && <Presupuesto onCambio={cargarStats} />}
           {pagina === 'participantes'           && <Participantes onCambio={cargarStats} />}
           {pagina === 'reportes'                && <Reportes />}
+          {pagina === 'directores'              && <Directores />}
           {pagina === 'importar'                && <Importar onImportado={cargarStats} />}
           {pagina === 'importar-capacitaciones' && <ImportarCapacitaciones onImportado={cargarStats} />}
 
