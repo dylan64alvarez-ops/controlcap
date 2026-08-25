@@ -349,4 +349,390 @@ export default function Directores() {
           dataCell(p._dir?.puesto || p.puesto_colab || '—', { bg }),
           dataCell(p._cap?.nombre || '—', { bg }),
           dataCell(p._cap?.fecha_inicio || '—', { align: 'center', bg }),
-          dataCell(`${p.horas || 0}h`, { align:
+          dataCell(`${p.horas || 0}h`, { align: 'center', color: XL.GREEN, bold: true, bg }),
+          accentCell(`₡${Math.round(p.costo || 0).toLocaleString()}`, XL.RED),
+        ])
+      })
+
+      const ws2 = XLSXStyle.utils.aoa_to_sheet(ws2Data)
+      ws2['!cols'] = [{ wch: 30 }, { wch: 28 }, { wch: 28 }, { wch: 38 }, { wch: 12 }, { wch: 8 }, { wch: 16 }]
+      ws2['!merges'] = [{ s:{r:0,c:0}, e:{r:0,c:6} }, { s:{r:1,c:0}, e:{r:1,c:6} }]
+      XLSXStyle.utils.book_append_sheet(wb, ws2, '👤 Participaciones')
+
+      XLSXStyle.writeFile(wb, `ControlCap_Directores_${filtroAnio||'Todos'}_${new Date().toISOString().slice(0,10)}.xlsx`)
+    } catch(e) { alert('Error: ' + e.message) }
+    setGenerando('')
+  }
+
+  async function generarPPTX() {
+    setGenerando('pptx')
+    try {
+      const pptx = new PptxGenJS()
+      pptx.layout = 'LAYOUT_WIDE'
+      const NAVY='1B2560', YELLOW='FFCF00', WHITE='FFFFFF', PURPLE='8131B0', BLUE='0072DA', RED='DA2B1F', LIGHT='F8FAFC', GRAY='64748B'
+
+      const filtroDesc = directorSeleccionado
+        ? `Director: ${directorSeleccionado.nombre || directorSeleccionado.correo}`
+        : `Todos los Directores · ${filtroAnio || 'Todos los años'}`
+
+      // Slide 1: Portada
+      const s1 = pptx.addSlide()
+      s1.background = { color: NAVY }
+      s1.addShape(pptx.ShapeType.rect, { x:0, y:4.5, w:13.33, h:3.0, fill:{color:PURPLE}, line:{color:PURPLE} })
+      s1.addText('Control', { x:0.6, y:0.5, w:2.5, h:0.8, fontSize:40, bold:true, color:YELLOW, fontFace:'Arial' })
+      s1.addText('Cap', { x:2.6, y:0.5, w:2, h:0.8, fontSize:40, bold:true, color:WHITE, fontFace:'Arial' })
+      s1.addText('Universidad Corporativa · CoopeAnde N.º 1', { x:0.6, y:1.4, w:9, h:0.4, fontSize:13, color:'AABCDE', fontFace:'Arial' })
+      s1.addText('Informe de Capacitación — Directores', { x:0.6, y:2.1, w:11, h:0.9, fontSize:30, bold:true, color:WHITE, fontFace:'Arial' })
+      s1.addText(filtroDesc, { x:0.6, y:3.1, w:12, h:0.5, fontSize:14, color:YELLOW, fontFace:'Arial' })
+      s1.addText(new Date().toLocaleDateString('es-CR',{year:'numeric',month:'long',day:'numeric'}), { x:0.6, y:4.7, w:8, h:0.4, fontSize:13, color:WHITE, fontFace:'Arial' })
+      s1.addText('Uso interno exclusivo', { x:0.6, y:5.2, w:8, h:0.35, fontSize:11, color:'AAAACC', fontFace:'Arial' })
+
+      // Slide 2: KPIs
+      const s2 = pptx.addSlide()
+      s2.background = { color: LIGHT }
+      s2.addText('Resumen Ejecutivo — Directores', { x:0.5, y:0.3, w:12, h:0.6, fontSize:22, bold:true, color:NAVY, fontFace:'Arial' })
+      s2.addText(filtroDesc, { x:0.5, y:0.9, w:12, h:0.35, fontSize:12, color:GRAY, fontFace:'Arial' })
+      const kpis = [
+        { label:'Capacitaciones', val:stats.capacitaciones.toString(), color:PURPLE },
+        { label:'Participaciones', val:stats.participaciones.toLocaleString(), color:BLUE },
+        { label:'Horas impartidas', val:stats.horas.toLocaleString()+'h', color:'D97706' },
+        { label:'Costo ejecutado', val:'₡'+Math.round(stats.costo).toLocaleString(), color:RED },
+      ]
+      kpis.forEach((k,i) => {
+        const x = 0.4 + i * 3.15
+        s2.addShape(pptx.ShapeType.rect, { x, y:1.5, w:2.9, h:1.8, fill:{color:WHITE}, line:{color:'E2E8F0',pt:1} })
+        s2.addShape(pptx.ShapeType.rect, { x, y:1.5, w:0.08, h:1.8, fill:{color:k.color}, line:{color:k.color} })
+        s2.addText(k.label.toUpperCase(), { x:x+0.2, y:1.65, w:2.6, h:0.3, fontSize:9, color:GRAY, fontFace:'Arial', bold:true })
+        s2.addText(k.val, { x:x+0.2, y:2.05, w:2.6, h:0.8, fontSize:24, bold:true, color:k.color, fontFace:'Arial' })
+      })
+
+      // Slide 3: Tabla de participaciones por director
+      const porDir = {}
+      participaciones.forEach(p => {
+        const k = p.correo
+        if (!porDir[k]) porDir[k] = { nombre: p._dir?.nombre || p.nombre_colab || k, puesto: p._dir?.puesto || '—', partic: 0, horas: 0, costo: 0 }
+        porDir[k].partic++
+        porDir[k].horas += Number(p.horas || 0)
+        porDir[k].costo += Number(p.costo || 0)
+      })
+      const dirArr = Object.values(porDir).sort((a,b) => b.partic - a.partic).slice(0, 10)
+
+      if (dirArr.length > 0) {
+        const s3 = pptx.addSlide()
+        s3.background = { color: WHITE }
+        s3.addText('Participaciones por Director', { x:0.5, y:0.3, w:12, h:0.55, fontSize:22, bold:true, color:NAVY, fontFace:'Arial' })
+        const rows = [
+          [
+            { text:'Director', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10} },
+            { text:'Puesto', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10} },
+            { text:'Participaciones', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },
+            { text:'Horas', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },
+            { text:'Costo', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'right'} },
+          ],
+          ...dirArr.map((d,i) => [
+            { text:d.nombre.length>35?d.nombre.slice(0,33)+'...':d.nombre, options:{fontSize:10,fill:i%2===0?WHITE:LIGHT,bold:true} },
+            { text:d.puesto.length>28?d.puesto.slice(0,26)+'...':d.puesto, options:{fontSize:9,fill:i%2===0?WHITE:LIGHT} },
+            { text:d.partic.toString(), options:{fontSize:10,align:'center',fill:i%2===0?WHITE:LIGHT} },
+            { text:d.horas+'h', options:{fontSize:10,align:'center',fill:i%2===0?WHITE:LIGHT} },
+            { text:'₡'+Math.round(d.costo).toLocaleString(), options:{fontSize:10,align:'right',fill:i%2===0?WHITE:LIGHT} },
+          ])
+        ]
+        s3.addTable(rows, { x:0.5, y:1.0, w:12.3, colW:[4.0,3.5,2.0,1.3,1.5], border:{type:'solid',pt:0.5,color:'E2E8F0'} })
+      }
+
+      // Slide 4: Top Capacitaciones
+      const capCount = {}
+      participaciones.forEach(p => {
+        if (!capCount[p.capacitacion_id]) capCount[p.capacitacion_id] = { nombre:p._cap?.nombre||'—', fecha:p._cap?.fecha_inicio||'—', partic:0, horas:0, costo:0 }
+        capCount[p.capacitacion_id].partic++
+        capCount[p.capacitacion_id].horas += Number(p.horas||0)
+        capCount[p.capacitacion_id].costo += Number(p.costo||0)
+      })
+      const topCaps = Object.values(capCount).sort((a,b)=>b.partic-a.partic).slice(0,8)
+
+      if (topCaps.length > 0) {
+        const s4 = pptx.addSlide()
+        s4.background = { color: LIGHT }
+        s4.addText('Top Capacitaciones — Directores', { x:0.5, y:0.3, w:12, h:0.55, fontSize:22, bold:true, color:NAVY, fontFace:'Arial' })
+        const rows2 = [
+          [
+            { text:'Capacitación', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10} },
+            { text:'Fecha', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },
+            { text:'Directores', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },
+            { text:'Horas', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },
+            { text:'Costo total', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'right'} },
+          ],
+          ...topCaps.map((c,i)=>[
+            { text:c.nombre.length>45?c.nombre.slice(0,43)+'...':c.nombre, options:{fontSize:10,fill:i%2===0?WHITE:LIGHT} },
+            { text:c.fecha||'—', options:{fontSize:9,align:'center',fill:i%2===0?WHITE:LIGHT} },
+            { text:c.partic.toString(), options:{fontSize:10,align:'center',fill:i%2===0?WHITE:LIGHT} },
+            { text:c.horas+'h', options:{fontSize:10,align:'center',fill:i%2===0?WHITE:LIGHT} },
+            { text:'₡'+Math.round(c.costo).toLocaleString(), options:{fontSize:10,align:'right',fill:i%2===0?WHITE:LIGHT} },
+          ])
+        ]
+        s4.addTable(rows2, { x:0.5, y:1.0, w:12.3, colW:[5.8,1.8,1.5,1.2,2.0], border:{type:'solid',pt:0.5,color:'E2E8F0'} })
+      }
+
+      // Slide 5: Cierre
+      const s5 = pptx.addSlide()
+      s5.background = { color: NAVY }
+      s5.addShape(pptx.ShapeType.rect, { x:0, y:3.2, w:13.33, h:0.08, fill:{color:YELLOW}, line:{color:YELLOW} })
+      s5.addText('Control', { x:4.2, y:0.8, w:2.4, h:0.9, fontSize:42, bold:true, color:YELLOW, fontFace:'Arial' })
+      s5.addText('Cap', { x:6.2, y:0.8, w:2, h:0.9, fontSize:42, bold:true, color:WHITE, fontFace:'Arial' })
+      s5.addText('Universidad Corporativa', { x:2, y:1.85, w:9.33, h:0.5, fontSize:18, color:'AABCDE', fontFace:'Arial', align:'center' })
+      s5.addText('CoopeAnde N.º 1', { x:2, y:2.4, w:9.33, h:0.4, fontSize:14, color:'AABCDE', fontFace:'Arial', align:'center' })
+      s5.addText('Informe generado el '+new Date().toLocaleDateString('es-CR'), { x:2, y:3.6, w:9.33, h:0.4, fontSize:12, color:WHITE, fontFace:'Arial', align:'center' })
+      s5.addText('Uso interno exclusivo', { x:2, y:4.1, w:9.33, h:0.35, fontSize:11, color:'8899BB', fontFace:'Arial', align:'center' })
+
+      await pptx.writeFile({ fileName: `ControlCap_Directores_${filtroAnio||'Todos'}_${new Date().toISOString().slice(0,10)}.pptx` })
+    } catch(e) { alert('Error: ' + e.message) }
+    setGenerando('')
+  }
+
+  const inp = { height:'36px', border:'1px solid #E2E8F0', borderRadius:'8px', padding:'0 10px', fontSize:'13px', outline:'none', background:'white' }
+
+  return (
+    <div>
+      {/* Tabs */}
+      <div style={{ display:'flex', gap:'8px', marginBottom:'20px' }}>
+        {[
+          { id:'dashboard', label:'📊 Dashboard' },
+          { id:'gestionar', label:'⚙️ Gestionar Directores' },
+        ].map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            style={{ padding:'8px 18px', borderRadius:'8px', border:'none', cursor:'pointer', fontSize:'13px', fontWeight:'500', background: tab === t.id ? '#1B2560' : '#F1F5F9', color: tab === t.id ? 'white' : '#64748B' }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── TAB DASHBOARD ── */}
+      {tab === 'dashboard' && (
+        <div>
+          {/* Filtros */}
+          <div style={{ background:'white', borderRadius:'12px', padding:'16px 20px', marginBottom:'20px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', display:'flex', gap:'12px', alignItems:'flex-end', flexWrap:'wrap' }}>
+            <div>
+              <label style={{ fontSize:'10px', color:'#94A3B8', fontWeight:'600', textTransform:'uppercase', display:'block', marginBottom:'4px' }}>Año</label>
+              <select value={filtroAnio} onChange={e => setFiltroAnio(e.target.value)} style={{ ...inp, width:'120px' }}>
+                <option value="">Todos los años</option>
+                {ANIOS.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize:'10px', color:'#94A3B8', fontWeight:'600', textTransform:'uppercase', display:'block', marginBottom:'4px' }}>Director</label>
+              <select value={directorSeleccionado?.id || ''} onChange={e => {
+                const dir = directores.find(d => d.id === e.target.value)
+                setDirectorSeleccionado(dir || null)
+              }} style={{ ...inp, width:'280px' }}>
+                <option value="">Todos los directores</option>
+                {directores.map(d => <option key={d.id} value={d.id}>{d.nombre || d.correo}</option>)}
+              </select>
+            </div>
+            {directores.length === 0 && (
+              <div style={{ fontSize:'12px', color:'#DA2B1F', padding:'8px 14px', background:'#FEF2F2', borderRadius:'8px' }}>
+                ⚠️ No hay directores registrados. Agregá correos en la pestaña "Gestionar Directores".
+              </div>
+            )}
+          </div>
+
+          {/* KPIs */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'14px', marginBottom:'24px' }}>
+            {[
+              { label:'Capacitaciones', val:stats.capacitaciones, color:COLORS.morado, icon:'🎓' },
+              { label:'Participaciones', val:stats.participaciones.toLocaleString(), color:COLORS.azul, icon:'👤' },
+              { label:'Horas impartidas', val:stats.horas.toLocaleString()+'h', color:'#D97706', icon:'⏱️' },
+              { label:'Costo ejecutado', val:'₡'+Math.round(stats.costo).toLocaleString(), color:COLORS.rojo, icon:'💰' },
+            ].map(k => (
+              <div key={k.label} style={{ background:'white', borderRadius:'12px', padding:'18px', borderLeft:`4px solid ${k.color}`, boxShadow:'0 1px 3px rgba(0,0,0,0.08)' }}>
+                <div style={{ fontSize:'11px', color:'#64748B', marginBottom:'6px' }}>{k.icon} {k.label}</div>
+                <div style={{ fontSize:'24px', fontWeight:'700', color:k.color }}>{cargando ? '...' : k.val}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Tabla de participaciones */}
+          <div style={{ background:'white', borderRadius:'12px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', overflow:'hidden', marginBottom:'20px' }}>
+            <div style={{ padding:'16px 20px', borderBottom:'1px solid #E2E8F0', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <div style={{ fontSize:'14px', fontWeight:'600', color:'#1E293B' }}>
+                👤 Participaciones de Directores
+                {directorSeleccionado && <span style={{ marginLeft:'8px', fontSize:'12px', color:'#8131B0', fontWeight:'400' }}>· {directorSeleccionado.nombre || directorSeleccionado.correo}</span>}
+              </div>
+              <div style={{ fontSize:'12px', color:'#64748B' }}>{participaciones.length} registros</div>
+            </div>
+            {cargando ? (
+              <div style={{ padding:'40px', textAlign:'center', color:'#94A3B8' }}>Cargando...</div>
+            ) : participaciones.length === 0 ? (
+              <div style={{ padding:'40px', textAlign:'center', color:'#94A3B8' }}>
+                <div style={{ fontSize:'32px', marginBottom:'10px' }}>👤</div>
+                <div style={{ fontWeight:'500' }}>No hay participaciones registradas</div>
+                <div style={{ fontSize:'13px', marginTop:'4px' }}>Ajustá los filtros o verificá que los directores estén registrados</div>
+              </div>
+            ) : (
+              <div style={{ overflowX:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                  <thead>
+                    <tr style={{ background:'#F8FAFC' }}>
+                      {['Director', 'Correo', 'Puesto', 'Capacitación', 'Fecha', 'Horas', 'Costo'].map(h => (
+                        <th key={h} style={{ padding:'10px 12px', fontSize:'11px', fontWeight:'600', color:'#94A3B8', textTransform:'uppercase', letterSpacing:'0.5px', borderBottom:'1px solid #E2E8F0', textAlign:'left', whiteSpace:'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {participaciones.map((p, i) => (
+                      <tr key={p.id} style={{ background: i%2===0 ? 'white' : '#FAFAFA' }}>
+                        <td style={{ padding:'10px 12px', fontWeight:'500', fontSize:'13px', whiteSpace:'nowrap' }}>{p._dir?.nombre || p.nombre_colab || '—'}</td>
+                        <td style={{ padding:'10px 12px', fontSize:'12px', color:'#0072DA' }}>{p.correo?.startsWith('sin-correo') ? '—' : p.correo}</td>
+                        <td style={{ padding:'10px 12px', fontSize:'12px', color:'#64748B', maxWidth:'160px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p._dir?.puesto || p.puesto_colab || '—'}</td>
+                        <td style={{ padding:'10px 12px', fontSize:'12px', color:'#374151', maxWidth:'220px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p._cap?.nombre || '—'}</td>
+                        <td style={{ padding:'10px 12px', fontSize:'12px', color:'#64748B', whiteSpace:'nowrap' }}>{p._cap?.fecha_inicio || '—'}</td>
+                        <td style={{ padding:'10px 12px', fontSize:'13px', fontWeight:'600', color:'#0F9B72' }}>{p.horas || 0}h</td>
+                        <td style={{ padding:'10px 12px', fontSize:'12px', color:'#DA2B1F', fontWeight:'600' }}>₡{Math.round(p.costo||0).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Botones de reporte */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'16px' }}>
+            {[
+              { id:'pdf', icon:'📄', titulo:'PDF Ejecutivo', desc:'Informe con KPIs y detalle de participaciones de directores.', color:COLORS.rojo, accion:generarPDF, boton:'Generar PDF' },
+              { id:'excel', icon:'📊', titulo:'Excel Estilizado', desc:'Resumen por director y detalle de participaciones con diseño CoopeAnde.', color:'#0F9B72', accion:generarExcel, boton:'Descargar Excel' },
+              { id:'pptx', icon:'📽️', titulo:'PowerPoint', desc:'Presentación ejecutiva con KPIs, tabla por director y top capacitaciones.', color:COLORS.morado, accion:generarPPTX, boton:'Descargar PPTX' },
+            ].map(r => (
+              <div key={r.id} style={{ background:'white', borderRadius:'16px', padding:'24px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', border:`1px solid ${r.color}22` }}>
+                <div style={{ fontSize:'32px', marginBottom:'10px' }}>{r.icon}</div>
+                <div style={{ fontSize:'16px', fontWeight:'600', color:'#1E293B', marginBottom:'6px' }}>{r.titulo}</div>
+                <div style={{ fontSize:'12px', color:'#64748B', marginBottom:'18px', lineHeight:'1.6' }}>{r.desc}</div>
+                <button onClick={r.accion} disabled={!!generando || participaciones.length === 0}
+                  style={{ background:generando===r.id||participaciones.length===0?'#E2E8F0':r.color, color:generando===r.id||participaciones.length===0?'#94A3B8':'white', border:'none', padding:'9px 20px', borderRadius:'8px', cursor:generando||participaciones.length===0?'not-allowed':'pointer', fontSize:'13px', fontWeight:'500', width:'100%' }}>
+                  {generando===r.id?'⏳ Generando...':r.boton}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── TAB GESTIONAR ── */}
+      {tab === 'gestionar' && (
+        <div>
+          {exitoDir && (
+            <div style={{ background:'#F0FDF4', border:'1px solid #BBF7D0', borderRadius:'8px', padding:'12px 16px', marginBottom:'16px', fontSize:'13px', color:'#166534' }}>
+              {exitoDir}
+            </div>
+          )}
+
+          {/* Agregar director */}
+          <div style={{ background:'white', borderRadius:'12px', padding:'20px', marginBottom:'20px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)' }}>
+            <div style={{ fontSize:'14px', fontWeight:'600', color:'#1E293B', marginBottom:'16px' }}>➕ Agregar Director</div>
+
+            {/* Tabs individual / masivo */}
+            <div style={{ display:'flex', gap:'8px', marginBottom:'16px' }}>
+              <button onClick={() => setModoImport(false)}
+                style={{ padding:'7px 16px', borderRadius:'8px', border:'none', cursor:'pointer', fontSize:'12px', fontWeight:'500', background:!modoImport?'#1B2560':'#F1F5F9', color:!modoImport?'white':'#64748B' }}>
+                👤 Individual
+              </button>
+              <button onClick={() => setModoImport(true)}
+                style={{ padding:'7px 16px', borderRadius:'8px', border:'none', cursor:'pointer', fontSize:'12px', fontWeight:'500', background:modoImport?'#1B2560':'#F1F5F9', color:modoImport?'white':'#64748B' }}>
+                📋 Pegar lista de correos
+              </button>
+            </div>
+
+            {!modoImport ? (
+              <div style={{ display:'flex', gap:'12px', flexWrap:'wrap', alignItems:'flex-end' }}>
+                <div>
+                  <label style={{ fontSize:'11px', fontWeight:'600', color:'#64748B', display:'block', marginBottom:'4px' }}>Correo *</label>
+                  <input type="text" placeholder="director@coopeande1.com" value={nuevoCorreo}
+                    onChange={e => setNuevoCorreo(e.target.value)}
+                    style={{ ...inp, width:'240px' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize:'11px', fontWeight:'600', color:'#64748B', display:'block', marginBottom:'4px' }}>Nombre (opcional)</label>
+                  <input type="text" placeholder="Se obtiene automáticamente" value={nuevoNombre}
+                    onChange={e => setNuevoNombre(e.target.value)}
+                    style={{ ...inp, width:'220px' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize:'11px', fontWeight:'600', color:'#64748B', display:'block', marginBottom:'4px' }}>Puesto (opcional)</label>
+                  <input type="text" placeholder="Se obtiene automáticamente" value={nuevoPuesto}
+                    onChange={e => setNuevoPuesto(e.target.value)}
+                    style={{ ...inp, width:'220px' }} />
+                </div>
+                <button onClick={agregarDirector} disabled={guardandoDir}
+                  style={{ background:guardandoDir?'#E2E8F0':'#1B2560', color:guardandoDir?'#94A3B8':'white', border:'none', padding:'0 20px', height:'36px', borderRadius:'8px', cursor:guardandoDir?'not-allowed':'pointer', fontSize:'13px', fontWeight:'500' }}>
+                  {guardandoDir ? '⏳ Guardando...' : '+ Agregar'}
+                </button>
+              </div>
+            ) : (
+              <div>
+                <label style={{ fontSize:'11px', fontWeight:'600', color:'#64748B', display:'block', marginBottom:'6px' }}>
+                  Pegá los correos de directores (uno por línea o separados por coma)
+                </label>
+                <textarea value={correosTexto} onChange={e => setCorreosTexto(e.target.value)}
+                  placeholder={'director1@coopeande1.com\ndirector2@coopeande1.com\ndirector3@coopeande1.com'}
+                  style={{ width:'100%', height:'120px', border:'1px solid #E2E8F0', borderRadius:'8px', padding:'10px', fontSize:'13px', outline:'none', resize:'vertical', fontFamily:'monospace' }} />
+                <div style={{ marginTop:'10px', display:'flex', gap:'8px' }}>
+                  <button onClick={importarCorreosMasivos} disabled={guardandoDir || !correosTexto.trim()}
+                    style={{ background:guardandoDir||!correosTexto.trim()?'#E2E8F0':'#1B2560', color:guardandoDir||!correosTexto.trim()?'#94A3B8':'white', border:'none', padding:'8px 20px', borderRadius:'8px', cursor:guardandoDir||!correosTexto.trim()?'not-allowed':'pointer', fontSize:'13px', fontWeight:'500' }}>
+                    {guardandoDir ? '⏳ Importando...' : '📋 Importar correos'}
+                  </button>
+                  <button onClick={() => { setModoImport(false); setCorreosTexto('') }}
+                    style={{ background:'#F1F5F9', color:'#64748B', border:'none', padding:'8px 16px', borderRadius:'8px', cursor:'pointer', fontSize:'13px' }}>
+                    Cancelar
+                  </button>
+                </div>
+                <div style={{ marginTop:'8px', fontSize:'11px', color:'#94A3B8' }}>
+                  💡 El sistema buscará automáticamente el nombre y puesto de cada correo en la base de colaboradores.
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Lista de directores */}
+          <div style={{ background:'white', borderRadius:'12px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', overflow:'hidden' }}>
+            <div style={{ padding:'16px 20px', borderBottom:'1px solid #E2E8F0', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <div style={{ fontSize:'14px', fontWeight:'600', color:'#1E293B' }}>👥 Directores registrados</div>
+              <div style={{ fontSize:'12px', color:'#64748B' }}>{directores.length} directores</div>
+            </div>
+            {directores.length === 0 ? (
+              <div style={{ padding:'40px', textAlign:'center', color:'#94A3B8' }}>
+                <div style={{ fontSize:'32px', marginBottom:'10px' }}>👤</div>
+                <div style={{ fontWeight:'500', marginBottom:'6px' }}>No hay directores registrados</div>
+                <div style={{ fontSize:'13px' }}>Agregá correos usando el formulario de arriba</div>
+              </div>
+            ) : (
+              <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                <thead>
+                  <tr style={{ background:'#F8FAFC' }}>
+                    {['Nombre', 'Correo', 'Puesto', 'Gerencia', ''].map(h => (
+                      <th key={h} style={{ padding:'10px 12px', fontSize:'11px', fontWeight:'600', color:'#94A3B8', textTransform:'uppercase', letterSpacing:'0.5px', borderBottom:'1px solid #E2E8F0', textAlign:'left' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {directores.map((d, i) => (
+                    <tr key={d.id} style={{ background: i%2===0 ? 'white' : '#FAFAFA' }}>
+                      <td style={{ padding:'10px 12px', fontWeight:'500', fontSize:'13px' }}>{d.nombre || '—'}</td>
+                      <td style={{ padding:'10px 12px', fontSize:'12px', color:'#0072DA' }}>{d.correo}</td>
+                      <td style={{ padding:'10px 12px', fontSize:'12px', color:'#64748B' }}>{d.puesto || '—'}</td>
+                      <td style={{ padding:'10px 12px', fontSize:'12px', color:'#64748B' }}>{d.gerencia || '—'}</td>
+                      <td style={{ padding:'10px 12px', textAlign:'right' }}>
+                        <button onClick={() => eliminarDirector(d.id)}
+                          style={{ background:'#FEF2F2', color:'#DA2B1F', border:'none', padding:'4px 12px', borderRadius:'6px', cursor:'pointer', fontSize:'12px' }}>
+                          Eliminar
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
