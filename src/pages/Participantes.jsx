@@ -75,6 +75,20 @@ export default function Participantes({ onCambio }) {
     setCargando(false)
   }
 
+  async function cargarCaps() {
+    const { data: caps } = await supabase
+      .from('capacitaciones')
+      .select('id, nombre, horas, costo, fecha_inicio, proveedor')
+      .order('nombre')
+    if (!caps) return
+    const cMap = {}
+    caps.forEach(c => { cMap[c.id] = c })
+    setCapacitaciones(caps)
+    setCapMap(cMap)
+    const provsUnicas = [...new Set(caps.map(c => c.proveedor).filter(Boolean))].sort()
+    setProveedores(provsUnicas)
+  }
+
   async function buscarConFiltros(pag, anio, cap, prov, busq, cMapR, cByIdR, cByCorreoR, cByNombreR, capsR, reset) {
     const cMapU = cMapR || capMap
     const cByIdU = cByIdR || colByIdMap
@@ -234,6 +248,11 @@ export default function Participantes({ onCambio }) {
     setModoMasivo(false)
   }
 
+  async function abrirModal() {
+    setModal(true)
+    await cargarCaps()
+  }
+
   async function cargarMas() {
     const nueva = paginaActual + 1
     setCargando(true)
@@ -323,7 +342,7 @@ export default function Participantes({ onCambio }) {
         <div style={{ fontSize: '13px', color: '#64748B' }}>
           {cargando ? 'Buscando...' : `${participantes.length} de ${totalCount.toLocaleString()} participantes`}
         </div>
-        <button onClick={() => setModal(true)}
+        <button onClick={abrirModal}
           style={{ background: '#8131B0', color: 'white', border: 'none', padding: '8px 18px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>
           + Agregar participante
         </button>
@@ -449,8 +468,7 @@ export default function Participantes({ onCambio }) {
                   const cap = capacitaciones.find(c => c.id === capSeleccionada)
                   return (
                     <div style={{ marginTop: '6px', fontSize: '11px', color: '#0F9B72', fontWeight: '500' }}>
-                      ✓ Seleccionada · {cap?.horas || 0}h
-                      {cap?.costo > 0 ? ` · ₡${cap.costo.toLocaleString()} por persona` : ''}
+                      ✓ Seleccionada · {cap?.horas || 0}h{cap?.costo > 0 ? ` · ₡${cap.costo.toLocaleString()} por persona` : ''}
                     </div>
                   )
                 })()}
