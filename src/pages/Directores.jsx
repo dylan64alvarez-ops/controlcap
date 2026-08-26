@@ -41,7 +41,6 @@ export default function Directores() {
   const [cargando, setCargando] = useState(true)
   const [generando, setGenerando] = useState('')
 
-  // Gestión de directores
   const [nuevoCorreo, setNuevoCorreo] = useState('')
   const [nuevoNombre, setNuevoNombre] = useState('')
   const [nuevoPuesto, setNuevoPuesto] = useState('')
@@ -61,8 +60,6 @@ export default function Directores() {
 
   async function cargarDashboard() {
     setCargando(true)
-
-    // Correos a filtrar
     const correosDir = directorSeleccionado
       ? [directorSeleccionado.correo]
       : directores.map(d => d.correo)
@@ -74,7 +71,6 @@ export default function Directores() {
       return
     }
 
-    // Cargar capacitaciones del año
     let qCap = supabase.from('capacitaciones').select('*')
     if (filtroAnio) qCap = qCap.gte('fecha_inicio', `${filtroAnio}-01-01`).lte('fecha_inicio', `${filtroAnio}-12-31`)
     const { data: caps } = await qCap
@@ -88,7 +84,6 @@ export default function Directores() {
       return
     }
 
-    // Cargar participantes de directores
     let partsRaw = []
     for (let i = 0; i < capIds.length; i += 400) {
       const lote = capIds.slice(i, i + 400)
@@ -106,10 +101,8 @@ export default function Directores() {
       }
     }
 
-    // Enriquecer
     const capMap = {}
     capsLookup.forEach(c => { capMap[c.id] = c })
-
     const dirMap = {}
     directores.forEach(d => { dirMap[d.correo.toLowerCase()] = d })
 
@@ -119,35 +112,35 @@ export default function Directores() {
       _dir: dirMap[p.correo?.toLowerCase()] || null,
     }))
 
-    const totalPartic = enriquecidos.length
-    const totalHoras = enriquecidos.reduce((s, p) => s + Number(p.horas || 0), 0)
-    const totalCosto = enriquecidos.reduce((s, p) => s + Number(p.costo || 0), 0)
-    const capsUnicas = new Set(enriquecidos.map(p => p.capacitacion_id)).size
-
-    setStats({ capacitaciones: capsUnicas, participaciones: totalPartic, horas: totalHoras, costo: totalCosto })
+    setStats({
+      capacitaciones: new Set(enriquecidos.map(p => p.capacitacion_id)).size,
+      participaciones: enriquecidos.length,
+      horas: enriquecidos.reduce((s, p) => s + Number(p.horas || 0), 0),
+      costo: enriquecidos.reduce((s, p) => s + Number(p.costo || 0), 0),
+    })
     setParticipaciones(enriquecidos)
     setCargando(false)
   }
 
   async function agregarDirector() {
-    if (!nuevoCorreo.trim() || !nuevoCorreo.includes('@')) {
+    const correoLimpio = nuevoCorreo.trim().toLowerCase()
+    if (!correoLimpio || !correoLimpio.includes('@') || !correoLimpio.includes('.')) {
       alert('Ingresá un correo válido')
       return
     }
     setGuardandoDir(true)
 
-    // Buscar info del colaborador si existe
     const { data: colData } = await supabase
       .from('colaboradores')
       .select('nombre, puesto, gerencia')
-      .eq('correo', nuevoCorreo.toLowerCase().trim())
+      .eq('correo', correoLimpio)
       .maybeSingle()
 
     const { error } = await supabase.from('directores').upsert({
-      correo: nuevoCorreo.toLowerCase().trim(),
-      nombre: nuevoNombre || colData?.nombre || '',
-      puesto: nuevoPuesto || colData?.puesto || '',
-      gerencia: nuevaGerencia || colData?.gerencia || '',
+      correo: correoLimpio,
+      nombre: nuevoNombre.trim() || colData?.nombre || '',
+      puesto: nuevoPuesto.trim() || colData?.puesto || '',
+      gerencia: nuevaGerencia.trim() || colData?.gerencia || '',
       activo: true,
     }, { onConflict: 'correo' })
 
@@ -166,14 +159,13 @@ export default function Directores() {
   }
 
   async function importarCorreosMasivos() {
-    const lineas = correosTexto.split(/[\n,;]+/).map(l => l.trim().toLowerCase()).filter(l => l.includes('@'))
+    const lineas = correosTexto.split(/[\n,;]+/).map(l => l.trim().toLowerCase()).filter(l => l.includes('@') && l.includes('.'))
     if (lineas.length === 0) { alert('No se encontraron correos válidos'); return }
 
     setGuardandoDir(true)
     let insertados = 0, errores = 0
 
     for (const correo of lineas) {
-      // Buscar info del colaborador
       const { data: colData } = await supabase
         .from('colaboradores')
         .select('nombre, puesto, gerencia')
@@ -209,7 +201,6 @@ export default function Directores() {
 
   async function generarPDF() {
     setGenerando('pdf')
-    const correosDir = directorSeleccionado ? [directorSeleccionado.correo] : directores.map(d => d.correo)
     const filtroDesc = directorSeleccionado
       ? `Director: ${directorSeleccionado.nombre || directorSeleccionado.correo}`
       : `Todos los Directores · ${filtroAnio || 'Todos los años'}`
@@ -293,7 +284,6 @@ export default function Directores() {
         ? `Director: ${directorSeleccionado.nombre || directorSeleccionado.correo}`
         : `Todos los Directores · ${filtroAnio || 'Todos los años'}`
 
-      // Resumen por director
       const porDirector = {}
       participaciones.forEach(p => {
         const correo = p.correo
@@ -330,7 +320,6 @@ export default function Directores() {
       ws1['!merges'] = [{ s:{r:0,c:0}, e:{r:0,c:4} }, { s:{r:1,c:0}, e:{r:1,c:4} }, { s:{r:2,c:0}, e:{r:2,c:4} }]
       XLSXStyle.utils.book_append_sheet(wb, ws1, '📊 Resumen Directores')
 
-      // Detalle participaciones
       const ws2Data = []
       ws2Data.push([titleCell('Detalle de Participaciones — Directores'), ...Array(6).fill(celda(''))])
       ws2Data.push([subtitleCell(filtroDesc), ...Array(6).fill(celda(''))])
@@ -370,12 +359,10 @@ export default function Directores() {
       const pptx = new PptxGenJS()
       pptx.layout = 'LAYOUT_WIDE'
       const NAVY='1B2560', YELLOW='FFCF00', WHITE='FFFFFF', PURPLE='8131B0', BLUE='0072DA', RED='DA2B1F', LIGHT='F8FAFC', GRAY='64748B'
-
       const filtroDesc = directorSeleccionado
         ? `Director: ${directorSeleccionado.nombre || directorSeleccionado.correo}`
         : `Todos los Directores · ${filtroAnio || 'Todos los años'}`
 
-      // Slide 1: Portada
       const s1 = pptx.addSlide()
       s1.background = { color: NAVY }
       s1.addShape(pptx.ShapeType.rect, { x:0, y:4.5, w:13.33, h:3.0, fill:{color:PURPLE}, line:{color:PURPLE} })
@@ -387,7 +374,6 @@ export default function Directores() {
       s1.addText(new Date().toLocaleDateString('es-CR',{year:'numeric',month:'long',day:'numeric'}), { x:0.6, y:4.7, w:8, h:0.4, fontSize:13, color:WHITE, fontFace:'Arial' })
       s1.addText('Uso interno exclusivo', { x:0.6, y:5.2, w:8, h:0.35, fontSize:11, color:'AAAACC', fontFace:'Arial' })
 
-      // Slide 2: KPIs
       const s2 = pptx.addSlide()
       s2.background = { color: LIGHT }
       s2.addText('Resumen Ejecutivo — Directores', { x:0.5, y:0.3, w:12, h:0.6, fontSize:22, bold:true, color:NAVY, fontFace:'Arial' })
@@ -406,7 +392,6 @@ export default function Directores() {
         s2.addText(k.val, { x:x+0.2, y:2.05, w:2.6, h:0.8, fontSize:24, bold:true, color:k.color, fontFace:'Arial' })
       })
 
-      // Slide 3: Tabla de participaciones por director
       const porDir = {}
       participaciones.forEach(p => {
         const k = p.correo
@@ -440,7 +425,6 @@ export default function Directores() {
         s3.addTable(rows, { x:0.5, y:1.0, w:12.3, colW:[4.0,3.5,2.0,1.3,1.5], border:{type:'solid',pt:0.5,color:'E2E8F0'} })
       }
 
-      // Slide 4: Top Capacitaciones
       const capCount = {}
       participaciones.forEach(p => {
         if (!capCount[p.capacitacion_id]) capCount[p.capacitacion_id] = { nombre:p._cap?.nombre||'—', fecha:p._cap?.fecha_inicio||'—', partic:0, horas:0, costo:0 }
@@ -473,7 +457,6 @@ export default function Directores() {
         s4.addTable(rows2, { x:0.5, y:1.0, w:12.3, colW:[5.8,1.8,1.5,1.2,2.0], border:{type:'solid',pt:0.5,color:'E2E8F0'} })
       }
 
-      // Slide 5: Cierre
       const s5 = pptx.addSlide()
       s5.background = { color: NAVY }
       s5.addShape(pptx.ShapeType.rect, { x:0, y:3.2, w:13.33, h:0.08, fill:{color:YELLOW}, line:{color:YELLOW} })
@@ -493,7 +476,6 @@ export default function Directores() {
 
   return (
     <div>
-      {/* Tabs */}
       <div style={{ display:'flex', gap:'8px', marginBottom:'20px' }}>
         {[
           { id:'dashboard', label:'📊 Dashboard' },
@@ -506,10 +488,8 @@ export default function Directores() {
         ))}
       </div>
 
-      {/* ── TAB DASHBOARD ── */}
       {tab === 'dashboard' && (
         <div>
-          {/* Filtros */}
           <div style={{ background:'white', borderRadius:'12px', padding:'16px 20px', marginBottom:'20px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', display:'flex', gap:'12px', alignItems:'flex-end', flexWrap:'wrap' }}>
             <div>
               <label style={{ fontSize:'10px', color:'#94A3B8', fontWeight:'600', textTransform:'uppercase', display:'block', marginBottom:'4px' }}>Año</label>
@@ -535,7 +515,6 @@ export default function Directores() {
             )}
           </div>
 
-          {/* KPIs */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'14px', marginBottom:'24px' }}>
             {[
               { label:'Capacitaciones', val:stats.capacitaciones, color:COLORS.morado, icon:'🎓' },
@@ -550,7 +529,6 @@ export default function Directores() {
             ))}
           </div>
 
-          {/* Tabla de participaciones */}
           <div style={{ background:'white', borderRadius:'12px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', overflow:'hidden', marginBottom:'20px' }}>
             <div style={{ padding:'16px 20px', borderBottom:'1px solid #E2E8F0', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
               <div style={{ fontSize:'14px', fontWeight:'600', color:'#1E293B' }}>
@@ -595,7 +573,6 @@ export default function Directores() {
             )}
           </div>
 
-          {/* Botones de reporte */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'16px' }}>
             {[
               { id:'pdf', icon:'📄', titulo:'PDF Ejecutivo', desc:'Informe con KPIs y detalle de participaciones de directores.', color:COLORS.rojo, accion:generarPDF, boton:'Generar PDF' },
@@ -616,7 +593,6 @@ export default function Directores() {
         </div>
       )}
 
-      {/* ── TAB GESTIONAR ── */}
       {tab === 'gestionar' && (
         <div>
           {exitoDir && (
@@ -625,11 +601,9 @@ export default function Directores() {
             </div>
           )}
 
-          {/* Agregar director */}
           <div style={{ background:'white', borderRadius:'12px', padding:'20px', marginBottom:'20px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)' }}>
             <div style={{ fontSize:'14px', fontWeight:'600', color:'#1E293B', marginBottom:'16px' }}>➕ Agregar Director</div>
 
-            {/* Tabs individual / masivo */}
             <div style={{ display:'flex', gap:'8px', marginBottom:'16px' }}>
               <button onClick={() => setModoImport(false)}
                 style={{ padding:'7px 16px', borderRadius:'8px', border:'none', cursor:'pointer', fontSize:'12px', fontWeight:'500', background:!modoImport?'#1B2560':'#F1F5F9', color:!modoImport?'white':'#64748B' }}>
@@ -645,21 +619,38 @@ export default function Directores() {
               <div style={{ display:'flex', gap:'12px', flexWrap:'wrap', alignItems:'flex-end' }}>
                 <div>
                   <label style={{ fontSize:'11px', fontWeight:'600', color:'#64748B', display:'block', marginBottom:'4px' }}>Correo *</label>
-                  <input type="text" placeholder="director@coopeande1.com" value={nuevoCorreo}
+                  <input
+                    type="text"
+                    placeholder="director@coopeande1.com"
+                    value={nuevoCorreo}
                     onChange={e => setNuevoCorreo(e.target.value)}
-                    style={{ ...inp, width:'240px' }} />
+                    onKeyDown={e => e.key === 'Enter' && agregarDirector()}
+                    autoComplete="off"
+                    spellCheck={false}
+                    style={{ ...inp, width:'240px' }}
+                  />
                 </div>
                 <div>
                   <label style={{ fontSize:'11px', fontWeight:'600', color:'#64748B', display:'block', marginBottom:'4px' }}>Nombre (opcional)</label>
-                  <input type="text" placeholder="Se obtiene automáticamente" value={nuevoNombre}
+                  <input
+                    type="text"
+                    placeholder="Se obtiene automáticamente"
+                    value={nuevoNombre}
                     onChange={e => setNuevoNombre(e.target.value)}
-                    style={{ ...inp, width:'220px' }} />
+                    autoComplete="off"
+                    style={{ ...inp, width:'220px' }}
+                  />
                 </div>
                 <div>
                   <label style={{ fontSize:'11px', fontWeight:'600', color:'#64748B', display:'block', marginBottom:'4px' }}>Puesto (opcional)</label>
-                  <input type="text" placeholder="Se obtiene automáticamente" value={nuevoPuesto}
+                  <input
+                    type="text"
+                    placeholder="Se obtiene automáticamente"
+                    value={nuevoPuesto}
                     onChange={e => setNuevoPuesto(e.target.value)}
-                    style={{ ...inp, width:'220px' }} />
+                    autoComplete="off"
+                    style={{ ...inp, width:'220px' }}
+                  />
                 </div>
                 <button onClick={agregarDirector} disabled={guardandoDir}
                   style={{ background:guardandoDir?'#E2E8F0':'#1B2560', color:guardandoDir?'#94A3B8':'white', border:'none', padding:'0 20px', height:'36px', borderRadius:'8px', cursor:guardandoDir?'not-allowed':'pointer', fontSize:'13px', fontWeight:'500' }}>
@@ -691,7 +682,6 @@ export default function Directores() {
             )}
           </div>
 
-          {/* Lista de directores */}
           <div style={{ background:'white', borderRadius:'12px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', overflow:'hidden' }}>
             <div style={{ padding:'16px 20px', borderBottom:'1px solid #E2E8F0', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
               <div style={{ fontSize:'14px', fontWeight:'600', color:'#1E293B' }}>👥 Directores registrados</div>
