@@ -32,6 +32,7 @@ export default function App() {
   const [graficas, setGraficas] = useState({ gerenciasPartic: [], gerenciasHoras: [], generos: [], mensual: [] })
   const [drillPartic, setDrillPartic] = useState(null)
   const [drillHoras, setDrillHoras] = useState(null)
+  const [directoresKey, setDirectoresKey] = useState(0)
 
   useEffect(() => { cargarStats() }, [anio])
 
@@ -327,6 +328,7 @@ export default function App() {
   function irA(id) {
     setPagina(id)
     if (id === 'dashboard') cargarStats()
+    if (id === 'directores') setDirectoresKey(k => k + 1)
   }
 
   const paginasActivas = [
@@ -422,21 +424,8 @@ export default function App() {
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 280px', gap: '16px', marginBottom: '16px' }}>
-                <PanelBarras
-                  titulo="🏢 Participaciones por Gerencia"
-                  datos={graficas.gerenciasPartic}
-                  colorBarra={COLORS.azul}
-                  drill={drillPartic}
-                  setDrill={setDrillPartic}
-                />
-                <PanelBarras
-                  titulo="⏱️ Horas por Gerencia"
-                  datos={graficas.gerenciasHoras}
-                  colorBarra={COLORS.morado}
-                  drill={drillHoras}
-                  setDrill={setDrillHoras}
-                  sufijo="h"
-                />
+                <PanelBarras titulo="🏢 Participaciones por Gerencia" datos={graficas.gerenciasPartic} colorBarra={COLORS.azul} drill={drillPartic} setDrill={setDrillPartic} />
+                <PanelBarras titulo="⏱️ Horas por Gerencia" datos={graficas.gerenciasHoras} colorBarra={COLORS.morado} drill={drillHoras} setDrill={setDrillHoras} sufijo="h" />
                 <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                   <div style={{ fontSize: '13px', fontWeight: '600', color: '#1E293B', marginBottom: '14px' }}>👥 Distribución por Género</div>
                   <GraficaDonut datos={graficas.generos} />
@@ -473,7 +462,7 @@ export default function App() {
           {pagina === 'presupuesto'             && <Presupuesto onCambio={cargarStats} />}
           {pagina === 'participantes'           && <Participantes onCambio={cargarStats} />}
           {pagina === 'reportes'                && <Reportes />}
-          {pagina === 'directores'              && <Directores />}
+          {pagina === 'directores'              && <Directores key={directoresKey} />}
           {pagina === 'importar'                && <Importar onImportado={cargarStats} />}
           {pagina === 'importar-capacitaciones' && <ImportarCapacitaciones onImportado={cargarStats} />}
 
