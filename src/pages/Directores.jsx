@@ -51,7 +51,9 @@ export default function Directores() {
   const [modoImport, setModoImport] = useState(false)
 
   useEffect(() => { cargarDirectores() }, [])
-  useEffect(() => { if (directores.length > 0) cargarDashboard() }, [directores, filtroAnio, directorSeleccionado])
+  useEffect(() => {
+    if (directores.length > 0) cargarDashboard()
+  }, [directores, filtroAnio, directorSeleccionado])
 
   async function cargarDirectores() {
     const { data } = await supabase.from('directores').select('*').eq('activo', true).order('nombre')
@@ -60,6 +62,7 @@ export default function Directores() {
 
   async function cargarDashboard() {
     setCargando(true)
+
     const correosDir = directorSeleccionado
       ? [directorSeleccionado.correo]
       : directores.map(d => d.correo)
@@ -71,46 +74,44 @@ export default function Directores() {
       return
     }
 
-    let qCap = supabase.from('capacitaciones').select('*')
-    if (filtroAnio) qCap = qCap.gte('fecha_inicio', `${filtroAnio}-01-01`).lte('fecha_inicio', `${filtroAnio}-12-31`)
-    const { data: caps } = await qCap
-    const capsLookup = caps || []
-    const capIds = capsLookup.map(c => c.id)
-
-    if (capIds.length === 0) {
-      setStats({ capacitaciones: 0, participaciones: 0, horas: 0, costo: 0 })
-      setParticipaciones([])
-      setCargando(false)
-      return
-    }
-
-    let partsRaw = []
-    for (let i = 0; i < capIds.length; i += 400) {
-      const lote = capIds.slice(i, i + 400)
-      let desde = 0
-      while (true) {
-        let q = supabase.from('participantes').select('*')
-          .in('capacitacion_id', lote)
-          .in('correo', correosDir)
-          .range(desde, desde + 999)
-        const { data: pLote } = await q
-        if (!pLote || pLote.length === 0) break
-        partsRaw.push(...pLote)
-        if (pLote.length < 1000) break
-        desde += 1000
-      }
-    }
-
+    // Cargar TODAS las capacitaciones para lookup
+    const { data: todasCaps } = await supabase.from('capacitaciones').select('*')
+    const capsLookup = todasCaps || []
     const capMap = {}
     capsLookup.forEach(c => { capMap[c.id] = c })
+
+    // Cargar participantes filtrando SOLO por correos de directores
+    let partsRaw = []
+    let desde = 0
+    while (true) {
+      const { data: pagina } = await supabase
+        .from('participantes')
+        .select('*')
+        .in('correo', correosDir)
+        .range(desde, desde + 999)
+      if (!pagina || pagina.length === 0) break
+      partsRaw.push(...pagina)
+      if (pagina.length < 1000) break
+      desde += 1000
+    }
+
+    // Mapear directores por correo
     const dirMap = {}
     directores.forEach(d => { dirMap[d.correo.toLowerCase()] = d })
 
-    const enriquecidos = partsRaw.map(p => ({
+    // Enriquecer con capacitación y director
+    let enriquecidos = partsRaw.map(p => ({
       ...p,
       _cap: capMap[p.capacitacion_id] || null,
       _dir: dirMap[p.correo?.toLowerCase()] || null,
     }))
+
+    // Filtrar por año en memoria
+    if (filtroAnio) {
+      enriquecidos = enriquecidos.filter(p =>
+        p._cap?.fecha_inicio?.startsWith(filtroAnio)
+      )
+    }
 
     setStats({
       capacitaciones: new Set(enriquecidos.map(p => p.capacitacion_id)).size,
@@ -632,25 +633,15 @@ export default function Directores() {
                 </div>
                 <div>
                   <label style={{ fontSize:'11px', fontWeight:'600', color:'#64748B', display:'block', marginBottom:'4px' }}>Nombre (opcional)</label>
-                  <input
-                    type="text"
-                    placeholder="Se obtiene automáticamente"
-                    value={nuevoNombre}
-                    onChange={e => setNuevoNombre(e.target.value)}
-                    autoComplete="off"
-                    style={{ ...inp, width:'220px' }}
-                  />
+                  <input type="text" placeholder="Se obtiene automáticamente" value={nuevoNombre}
+                    onChange={e => setNuevoNombre(e.target.value)} autoComplete="off"
+                    style={{ ...inp, width:'220px' }} />
                 </div>
                 <div>
                   <label style={{ fontSize:'11px', fontWeight:'600', color:'#64748B', display:'block', marginBottom:'4px' }}>Puesto (opcional)</label>
-                  <input
-                    type="text"
-                    placeholder="Se obtiene automáticamente"
-                    value={nuevoPuesto}
-                    onChange={e => setNuevoPuesto(e.target.value)}
-                    autoComplete="off"
-                    style={{ ...inp, width:'220px' }}
-                  />
+                  <input type="text" placeholder="Se obtiene automáticamente" value={nuevoPuesto}
+                    onChange={e => setNuevoPuesto(e.target.value)} autoComplete="off"
+                    style={{ ...inp, width:'220px' }} />
                 </div>
                 <button onClick={agregarDirector} disabled={guardandoDir}
                   style={{ background:guardandoDir?'#E2E8F0':'#1B2560', color:guardandoDir?'#94A3B8':'white', border:'none', padding:'0 20px', height:'36px', borderRadius:'8px', cursor:guardandoDir?'not-allowed':'pointer', fontSize:'13px', fontWeight:'500' }}>
