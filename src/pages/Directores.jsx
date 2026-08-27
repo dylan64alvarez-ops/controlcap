@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import XLSXStyle from 'xlsx-js-style'
 import PptxGenJS from 'pptxgenjs'
@@ -38,34 +38,52 @@ export default function Directores() {
   const [filtroAnio, setFiltroAnio] = useState('2026')
   const [stats, setStats] = useState({ capacitaciones: 0, participaciones: 0, horas: 0, costo: 0 })
   const [participaciones, setParticipaciones] = useState([])
-  const [cargando, setCargando] = useState(true)
+  const [cargando, setCargando] = useState(false)
   const [generando, setGenerando] = useState('')
 
   const [nuevoCorreo, setNuevoCorreo] = useState('')
   const [nuevoNombre, setNuevoNombre] = useState('')
   const [nuevoPuesto, setNuevoPuesto] = useState('')
-  const [nuevaGerencia, setNuevaGerencia] = useState('')
   const [guardandoDir, setGuardandoDir] = useState(false)
   const [exitoDir, setExitoDir] = useState('')
   const [correosTexto, setCorreosTexto] = useState('')
   const [modoImport, setModoImport] = useState(false)
 
-  useEffect(() => { cargarDirectores() }, [])
+  // Cargar directores al montar
   useEffect(() => {
-    if (directores.length > 0) cargarDashboard()
-  }, [directores, filtroAnio, directorSeleccionado])
+    cargarTodo()
+  }, [])
+
+  // Recargar dashboard cuando cambia filtro o director seleccionado
+  useEffect(() => {
+    cargarDashboard()
+  }, [filtroAnio, directorSeleccionado])
+
+  async function cargarTodo() {
+    const dirs = await cargarDirectores()
+    await cargarDashboardConDirs(dirs)
+  }
 
   async function cargarDirectores() {
     const { data } = await supabase.from('directores').select('*').eq('activo', true).order('nombre')
-    setDirectores(data || [])
+    const dirs = data || []
+    setDirectores(dirs)
+    return dirs
   }
 
   async function cargarDashboard() {
+    // Usar los directores del estado actual
+    const { data: dirsData } = await supabase.from('directores').select('*').eq('activo', true)
+    const dirs = dirsData || []
+    await cargarDashboardConDirs(dirs)
+  }
+
+  async function cargarDashboardConDirs(dirs) {
     setCargando(true)
 
     const correosDir = directorSeleccionado
       ? [directorSeleccionado.correo]
-      : directores.map(d => d.correo)
+      : dirs.map(d => d.correo)
 
     if (correosDir.length === 0) {
       setStats({ capacitaciones: 0, participaciones: 0, horas: 0, costo: 0 })
@@ -80,16 +98,16 @@ export default function Directores() {
     const capMap = {}
     capsLookup.forEach(c => { capMap[c.id] = c })
 
-    // Cargar participantes filtrando SOLO por correos de directores
+    // Cargar participantes filtrando por correos de directores con paginación
     let partsRaw = []
     let desde = 0
     while (true) {
-      const { data: pagina } = await supabase
+      const { data: pagina, error } = await supabase
         .from('participantes')
         .select('*')
         .in('correo', correosDir)
         .range(desde, desde + 999)
-      if (!pagina || pagina.length === 0) break
+      if (error || !pagina || pagina.length === 0) break
       partsRaw.push(...pagina)
       if (pagina.length < 1000) break
       desde += 1000
@@ -97,9 +115,9 @@ export default function Directores() {
 
     // Mapear directores por correo
     const dirMap = {}
-    directores.forEach(d => { dirMap[d.correo.toLowerCase()] = d })
+    dirs.forEach(d => { dirMap[d.correo.toLowerCase()] = d })
 
-    // Enriquecer con capacitación y director
+    // Enriquecer
     let enriquecidos = partsRaw.map(p => ({
       ...p,
       _cap: capMap[p.capacitacion_id] || null,
@@ -130,65 +148,42 @@ export default function Directores() {
       return
     }
     setGuardandoDir(true)
-
-    const { data: colData } = await supabase
-      .from('colaboradores')
-      .select('nombre, puesto, gerencia')
-      .eq('correo', correoLimpio)
-      .maybeSingle()
-
+    const { data: colData } = await supabase.from('colaboradores').select('nombre, puesto, gerencia').eq('correo', correoLimpio).maybeSingle()
     const { error } = await supabase.from('directores').upsert({
       correo: correoLimpio,
       nombre: nuevoNombre.trim() || colData?.nombre || '',
       puesto: nuevoPuesto.trim() || colData?.puesto || '',
-      gerencia: nuevaGerencia.trim() || colData?.gerencia || '',
+      gerencia: colData?.gerencia || '',
       activo: true,
     }, { onConflict: 'correo' })
-
     if (!error) {
       setExitoDir('✅ Director agregado correctamente')
       setNuevoCorreo('')
       setNuevoNombre('')
       setNuevoPuesto('')
-      setNuevaGerencia('')
-      await cargarDirectores()
+      await cargarTodo()
       setTimeout(() => setExitoDir(''), 3000)
-    } else {
-      alert('Error: ' + error.message)
-    }
+    } else { alert('Error: ' + error.message) }
     setGuardandoDir(false)
   }
 
   async function importarCorreosMasivos() {
     const lineas = correosTexto.split(/[\n,;]+/).map(l => l.trim().toLowerCase()).filter(l => l.includes('@') && l.includes('.'))
     if (lineas.length === 0) { alert('No se encontraron correos válidos'); return }
-
     setGuardandoDir(true)
     let insertados = 0, errores = 0
-
     for (const correo of lineas) {
-      const { data: colData } = await supabase
-        .from('colaboradores')
-        .select('nombre, puesto, gerencia')
-        .eq('correo', correo)
-        .maybeSingle()
-
+      const { data: colData } = await supabase.from('colaboradores').select('nombre, puesto, gerencia').eq('correo', correo).maybeSingle()
       const { error } = await supabase.from('directores').upsert({
-        correo,
-        nombre: colData?.nombre || '',
-        puesto: colData?.puesto || '',
-        gerencia: colData?.gerencia || '',
-        activo: true,
+        correo, nombre: colData?.nombre || '', puesto: colData?.puesto || '', gerencia: colData?.gerencia || '', activo: true,
       }, { onConflict: 'correo' })
-
       if (!error) insertados++
       else errores++
     }
-
     setExitoDir(`✅ ${insertados} directores importados${errores > 0 ? `, ${errores} errores` : ''}`)
     setCorreosTexto('')
     setModoImport(false)
-    await cargarDirectores()
+    await cargarTodo()
     setTimeout(() => setExitoDir(''), 4000)
     setGuardandoDir(false)
   }
@@ -196,8 +191,8 @@ export default function Directores() {
   async function eliminarDirector(id) {
     if (!confirm('¿Eliminar este director de la lista?')) return
     await supabase.from('directores').update({ activo: false }).eq('id', id)
-    await cargarDirectores()
     if (directorSeleccionado?.id === id) setDirectorSeleccionado(null)
+    await cargarTodo()
   }
 
   async function generarPDF() {
@@ -325,11 +320,7 @@ export default function Directores() {
       ws2Data.push([titleCell('Detalle de Participaciones — Directores'), ...Array(6).fill(celda(''))])
       ws2Data.push([subtitleCell(filtroDesc), ...Array(6).fill(celda(''))])
       ws2Data.push(Array(7).fill(celda('')))
-      ws2Data.push([
-        headerCell('DIRECTOR'), headerCell('CORREO'), headerCell('PUESTO'),
-        headerCell('CAPACITACIÓN'), headerCell('FECHA', XL.BLUE),
-        headerCell('HORAS', XL.BLUE), headerCell('COSTO (₡)', XL.RED),
-      ])
+      ws2Data.push([headerCell('DIRECTOR'), headerCell('CORREO'), headerCell('PUESTO'), headerCell('CAPACITACIÓN'), headerCell('FECHA', XL.BLUE), headerCell('HORAS', XL.BLUE), headerCell('COSTO (₡)', XL.RED)])
 
       participaciones.forEach((p, i) => {
         const bg = i % 2 === 0 ? XL.WHITE : XL.LIGHT
@@ -408,13 +399,7 @@ export default function Directores() {
         s3.background = { color: WHITE }
         s3.addText('Participaciones por Director', { x:0.5, y:0.3, w:12, h:0.55, fontSize:22, bold:true, color:NAVY, fontFace:'Arial' })
         const rows = [
-          [
-            { text:'Director', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10} },
-            { text:'Puesto', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10} },
-            { text:'Participaciones', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },
-            { text:'Horas', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },
-            { text:'Costo', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'right'} },
-          ],
+          [{ text:'Director', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10} },{ text:'Puesto', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10} },{ text:'Participaciones', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },{ text:'Horas', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },{ text:'Costo', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'right'} }],
           ...dirArr.map((d,i) => [
             { text:d.nombre.length>35?d.nombre.slice(0,33)+'...':d.nombre, options:{fontSize:10,fill:i%2===0?WHITE:LIGHT,bold:true} },
             { text:d.puesto.length>28?d.puesto.slice(0,26)+'...':d.puesto, options:{fontSize:9,fill:i%2===0?WHITE:LIGHT} },
@@ -440,13 +425,7 @@ export default function Directores() {
         s4.background = { color: LIGHT }
         s4.addText('Top Capacitaciones — Directores', { x:0.5, y:0.3, w:12, h:0.55, fontSize:22, bold:true, color:NAVY, fontFace:'Arial' })
         const rows2 = [
-          [
-            { text:'Capacitación', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10} },
-            { text:'Fecha', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },
-            { text:'Directores', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },
-            { text:'Horas', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },
-            { text:'Costo total', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'right'} },
-          ],
+          [{ text:'Capacitación', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10} },{ text:'Fecha', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },{ text:'Directores', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },{ text:'Horas', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'center'} },{ text:'Costo total', options:{bold:true,color:WHITE,fill:NAVY,fontSize:10,align:'right'} }],
           ...topCaps.map((c,i)=>[
             { text:c.nombre.length>45?c.nombre.slice(0,43)+'...':c.nombre, options:{fontSize:10,fill:i%2===0?WHITE:LIGHT} },
             { text:c.fecha||'—', options:{fontSize:9,align:'center',fill:i%2===0?WHITE:LIGHT} },
@@ -478,10 +457,7 @@ export default function Directores() {
   return (
     <div>
       <div style={{ display:'flex', gap:'8px', marginBottom:'20px' }}>
-        {[
-          { id:'dashboard', label:'📊 Dashboard' },
-          { id:'gestionar', label:'⚙️ Gestionar Directores' },
-        ].map(t => (
+        {[{ id:'dashboard', label:'📊 Dashboard' }, { id:'gestionar', label:'⚙️ Gestionar Directores' }].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             style={{ padding:'8px 18px', borderRadius:'8px', border:'none', cursor:'pointer', fontSize:'13px', fontWeight:'500', background: tab === t.id ? '#1B2560' : '#F1F5F9', color: tab === t.id ? 'white' : '#64748B' }}>
             {t.label}
@@ -491,6 +467,7 @@ export default function Directores() {
 
       {tab === 'dashboard' && (
         <div>
+          {/* Filtros */}
           <div style={{ background:'white', borderRadius:'12px', padding:'16px 20px', marginBottom:'20px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', display:'flex', gap:'12px', alignItems:'flex-end', flexWrap:'wrap' }}>
             <div>
               <label style={{ fontSize:'10px', color:'#94A3B8', fontWeight:'600', textTransform:'uppercase', display:'block', marginBottom:'4px' }}>Año</label>
@@ -509,6 +486,13 @@ export default function Directores() {
                 {directores.map(d => <option key={d.id} value={d.id}>{d.nombre || d.correo}</option>)}
               </select>
             </div>
+            <div>
+              <label style={{ fontSize:'10px', color:'transparent', display:'block', marginBottom:'4px' }}>-</label>
+              <button onClick={cargarDashboard} disabled={cargando}
+                style={{ ...inp, width:'auto', padding:'0 16px', cursor:cargando?'not-allowed':'pointer', background:'#EEF0FF', color:'#8131B0', border:'none', fontWeight:'500' }}>
+                {cargando ? '⏳' : '🔄 Actualizar'}
+              </button>
+            </div>
             {directores.length === 0 && (
               <div style={{ fontSize:'12px', color:'#DA2B1F', padding:'8px 14px', background:'#FEF2F2', borderRadius:'8px' }}>
                 ⚠️ No hay directores registrados. Agregá correos en la pestaña "Gestionar Directores".
@@ -516,6 +500,7 @@ export default function Directores() {
             )}
           </div>
 
+          {/* KPIs */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'14px', marginBottom:'24px' }}>
             {[
               { label:'Capacitaciones', val:stats.capacitaciones, color:COLORS.morado, icon:'🎓' },
@@ -530,6 +515,7 @@ export default function Directores() {
             ))}
           </div>
 
+          {/* Tabla */}
           <div style={{ background:'white', borderRadius:'12px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', overflow:'hidden', marginBottom:'20px' }}>
             <div style={{ padding:'16px 20px', borderBottom:'1px solid #E2E8F0', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
               <div style={{ fontSize:'14px', fontWeight:'600', color:'#1E293B' }}>
@@ -544,7 +530,7 @@ export default function Directores() {
               <div style={{ padding:'40px', textAlign:'center', color:'#94A3B8' }}>
                 <div style={{ fontSize:'32px', marginBottom:'10px' }}>👤</div>
                 <div style={{ fontWeight:'500' }}>No hay participaciones registradas</div>
-                <div style={{ fontSize:'13px', marginTop:'4px' }}>Ajustá los filtros o verificá que los directores estén registrados</div>
+                <div style={{ fontSize:'13px', marginTop:'4px' }}>Ajustá los filtros o presioná 🔄 Actualizar</div>
               </div>
             ) : (
               <div style={{ overflowX:'auto' }}>
@@ -574,6 +560,7 @@ export default function Directores() {
             )}
           </div>
 
+          {/* Botones reporte */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'16px' }}>
             {[
               { id:'pdf', icon:'📄', titulo:'PDF Ejecutivo', desc:'Informe con KPIs y detalle de participaciones de directores.', color:COLORS.rojo, accion:generarPDF, boton:'Generar PDF' },
@@ -604,44 +591,28 @@ export default function Directores() {
 
           <div style={{ background:'white', borderRadius:'12px', padding:'20px', marginBottom:'20px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)' }}>
             <div style={{ fontSize:'14px', fontWeight:'600', color:'#1E293B', marginBottom:'16px' }}>➕ Agregar Director</div>
-
             <div style={{ display:'flex', gap:'8px', marginBottom:'16px' }}>
-              <button onClick={() => setModoImport(false)}
-                style={{ padding:'7px 16px', borderRadius:'8px', border:'none', cursor:'pointer', fontSize:'12px', fontWeight:'500', background:!modoImport?'#1B2560':'#F1F5F9', color:!modoImport?'white':'#64748B' }}>
-                👤 Individual
-              </button>
-              <button onClick={() => setModoImport(true)}
-                style={{ padding:'7px 16px', borderRadius:'8px', border:'none', cursor:'pointer', fontSize:'12px', fontWeight:'500', background:modoImport?'#1B2560':'#F1F5F9', color:modoImport?'white':'#64748B' }}>
-                📋 Pegar lista de correos
-              </button>
+              <button onClick={() => setModoImport(false)} style={{ padding:'7px 16px', borderRadius:'8px', border:'none', cursor:'pointer', fontSize:'12px', fontWeight:'500', background:!modoImport?'#1B2560':'#F1F5F9', color:!modoImport?'white':'#64748B' }}>👤 Individual</button>
+              <button onClick={() => setModoImport(true)} style={{ padding:'7px 16px', borderRadius:'8px', border:'none', cursor:'pointer', fontSize:'12px', fontWeight:'500', background:modoImport?'#1B2560':'#F1F5F9', color:modoImport?'white':'#64748B' }}>📋 Pegar lista de correos</button>
             </div>
 
             {!modoImport ? (
               <div style={{ display:'flex', gap:'12px', flexWrap:'wrap', alignItems:'flex-end' }}>
                 <div>
                   <label style={{ fontSize:'11px', fontWeight:'600', color:'#64748B', display:'block', marginBottom:'4px' }}>Correo *</label>
-                  <input
-                    type="text"
-                    placeholder="director@coopeande1.com"
-                    value={nuevoCorreo}
-                    onChange={e => setNuevoCorreo(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && agregarDirector()}
-                    autoComplete="off"
-                    spellCheck={false}
-                    style={{ ...inp, width:'240px' }}
-                  />
+                  <input type="text" placeholder="director@coopeande1.com" value={nuevoCorreo}
+                    onChange={e => setNuevoCorreo(e.target.value)} onKeyDown={e => e.key === 'Enter' && agregarDirector()}
+                    autoComplete="off" spellCheck={false} style={{ ...inp, width:'240px' }} />
                 </div>
                 <div>
                   <label style={{ fontSize:'11px', fontWeight:'600', color:'#64748B', display:'block', marginBottom:'4px' }}>Nombre (opcional)</label>
                   <input type="text" placeholder="Se obtiene automáticamente" value={nuevoNombre}
-                    onChange={e => setNuevoNombre(e.target.value)} autoComplete="off"
-                    style={{ ...inp, width:'220px' }} />
+                    onChange={e => setNuevoNombre(e.target.value)} autoComplete="off" style={{ ...inp, width:'220px' }} />
                 </div>
                 <div>
                   <label style={{ fontSize:'11px', fontWeight:'600', color:'#64748B', display:'block', marginBottom:'4px' }}>Puesto (opcional)</label>
                   <input type="text" placeholder="Se obtiene automáticamente" value={nuevoPuesto}
-                    onChange={e => setNuevoPuesto(e.target.value)} autoComplete="off"
-                    style={{ ...inp, width:'220px' }} />
+                    onChange={e => setNuevoPuesto(e.target.value)} autoComplete="off" style={{ ...inp, width:'220px' }} />
                 </div>
                 <button onClick={agregarDirector} disabled={guardandoDir}
                   style={{ background:guardandoDir?'#E2E8F0':'#1B2560', color:guardandoDir?'#94A3B8':'white', border:'none', padding:'0 20px', height:'36px', borderRadius:'8px', cursor:guardandoDir?'not-allowed':'pointer', fontSize:'13px', fontWeight:'500' }}>
@@ -650,11 +621,9 @@ export default function Directores() {
               </div>
             ) : (
               <div>
-                <label style={{ fontSize:'11px', fontWeight:'600', color:'#64748B', display:'block', marginBottom:'6px' }}>
-                  Pegá los correos de directores (uno por línea o separados por coma)
-                </label>
+                <label style={{ fontSize:'11px', fontWeight:'600', color:'#64748B', display:'block', marginBottom:'6px' }}>Pegá los correos de directores (uno por línea o separados por coma)</label>
                 <textarea value={correosTexto} onChange={e => setCorreosTexto(e.target.value)}
-                  placeholder={'director1@coopeande1.com\ndirector2@coopeande1.com\ndirector3@coopeande1.com'}
+                  placeholder={'director1@coopeande1.com\ndirector2@coopeande1.com'}
                   style={{ width:'100%', height:'120px', border:'1px solid #E2E8F0', borderRadius:'8px', padding:'10px', fontSize:'13px', outline:'none', resize:'vertical', fontFamily:'monospace' }} />
                 <div style={{ marginTop:'10px', display:'flex', gap:'8px' }}>
                   <button onClick={importarCorreosMasivos} disabled={guardandoDir || !correosTexto.trim()}
@@ -662,13 +631,9 @@ export default function Directores() {
                     {guardandoDir ? '⏳ Importando...' : '📋 Importar correos'}
                   </button>
                   <button onClick={() => { setModoImport(false); setCorreosTexto('') }}
-                    style={{ background:'#F1F5F9', color:'#64748B', border:'none', padding:'8px 16px', borderRadius:'8px', cursor:'pointer', fontSize:'13px' }}>
-                    Cancelar
-                  </button>
+                    style={{ background:'#F1F5F9', color:'#64748B', border:'none', padding:'8px 16px', borderRadius:'8px', cursor:'pointer', fontSize:'13px' }}>Cancelar</button>
                 </div>
-                <div style={{ marginTop:'8px', fontSize:'11px', color:'#94A3B8' }}>
-                  💡 El sistema buscará automáticamente el nombre y puesto de cada correo en la base de colaboradores.
-                </div>
+                <div style={{ marginTop:'8px', fontSize:'11px', color:'#94A3B8' }}>💡 El sistema buscará automáticamente el nombre y puesto de cada correo en la base de colaboradores.</div>
               </div>
             )}
           </div>
